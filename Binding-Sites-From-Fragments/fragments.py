@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import pandas as pd
 import pypdb
 import pubchempy
+import xmltodict
+import yaml
+import pprint
+import urllib
+import os
 
 class Fragments():
     """
@@ -34,12 +40,11 @@ class Fragments():
         :param method:
         :return:
         """
-        import pprint
 
         compound = pubchempy.get_compounds([ligand], ligand_input_format)
         pprint.pprint(compound[0].to_dict())
 
-    def search_for_fragment_containing_ligands(self, predefined_fragments=False):
+    def search_for_fragment_containing_ligands(self, user_defined_dir, predefined_fragments=False):
         """
         Search PDB or Pubchem for fragment-containing small molecules.
         
@@ -87,7 +92,39 @@ class Fragments():
         Fragments.generate_fragements_from_ligand()
         :return: 
         """
-        fragment_list =
+
+        InChIKey_to_PDB = pd.read_csv("./Additional_Files/Components-inchikey.tsv",
+                                      delimiter="\t",
+                                      names=["cmpdinchikey", "PDBID", "Name"])
+        # debug
+        pprint.pprint(InChIKey_to_PDB)
+
+        # Perform fragment search through PubChem
+        # I wanted to do this through the pubchempy API, but I can't get it to work for some reason
+        # Falling back to manually doing the searches on Pubchem and downloading the detailed search results
+        # Name each search using the SMILES string to simplify things
+
+        search_dir = "./{}".format(user_defined_dir)
+
+        for search_query in os.listdir(search_dir):
+            # pubchem_search_results = pubchempy.get_compounds("N1C=CN=C1",
+            #                                                  searchtype='substructure',
+            #                                                  listkey_count=0,
+            #                                                  as_dataframe=True)
+            # pprint.pprint(pubchem_search_results)
+            print(os.path.join(user_defined_dir, search_query))
+            pubchem_results = pd.read_csv(os.path.join(user_defined_dir, search_query))
+
+            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='left', on='cmpdinchikey')
+            ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
+
+            # todo: Add option to export PBD ligand matches
+            # ligands_in_pdb_df.to_csv('{}_pdb.csv'.format(search_query))
+
+            # Generate set of PDBIDs for fragment-containing ligands
+            pdbid_set = set(ligands_in_pdb_df['PDBID'])
+            print(pdbid_set)
+
 
     def bootstrap_method(self):
         """
@@ -95,10 +132,6 @@ class Fragments():
         
         :return: 
         """
-        import xmltodict
-        import yaml
-        import pprint
-        import urllib
 
         # Substructure search for each fragment, returning ligands
         search_dict = yaml.load_all(open("./Working_Files/Search_query.yaml"))

@@ -21,14 +21,25 @@ well as binding specificity.
 
 Usage:
     bsff generate_fragments <ligand> [options]
+    bsff search <user_defined_dir>
+    bsff bootstrap
 
 Arguments:
     generate_fragments
         Generate fragments for a given compound
-
+    
+    search
+        Search for fragment-containing ligands
+        
+    bootstrap
+        Bootstrap method for getting everything done ASAP...
+        
     <ligand>
         By default, this is the name of the target ligand. This can be changed
         using the [ligand_input_format] option
+        
+    <user_defined_dir>
+        Directory defined by user containing PubChem search results
 
 Options:
     -f --ligand_input_format <format>
@@ -38,8 +49,6 @@ Options:
 
 if __name__ == '__main__':
     import docopt
-    import numpy as np
-    import Bio
     from .fragments import Fragments
 
     args = docopt.docopt(__doc__)
@@ -48,3 +57,9 @@ if __name__ == '__main__':
 
     if args['generate_fragments']:
         frag.generate_fragements_from_ligand(args['<ligand>'])
+
+    if args['search']:
+        frag.search_for_fragment_containing_ligands(args['<user_defined_dir>'])
+
+    if args['bootstrap']:
+        frag.bootstrap_method()
