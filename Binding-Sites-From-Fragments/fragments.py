@@ -88,6 +88,39 @@ class Fragments():
             between each. This should be constant for all fragment-containing small molecule matches and can be applied
             to automatically aligning all matches. 
         
+        * Directory Tree
+        
+        user_defined_dir
+        |--Fragment_search_results
+        |  |--[Fragment smiles 1].csv
+        |  |--[Fragment smiles 2].csv
+        |
+        |--Fragment_PDB_Matches
+           |--[Fragment smiles 1]
+           |  |--[Fragment smiles 1]_pdb.csv
+           |  |--[Ligand PDBID 1]
+           |  |  |--[PDB 1]
+           |  |  |--[PDB 2]
+           |  |  |--[PDB ...]
+           |  |
+           |  |--[Ligand PDBID 2]
+           |     |--[PDB 1]
+           |     |--[PDB 2]
+           |     |--[PDB ...]
+           |
+           |--[Fragment smiles 2]
+           |  |--[Fragment smiles 2]_pdb.csv
+           |  |--[Ligand PDBID]
+           |  |  |--[PDB 1]
+           |  |  |--[PDB 2]
+           |  |  |--[PDB ...]
+           |  |
+           |  |--[Ligand PDBID 2]
+           |     |--[PDB 1]
+           |     |--[PDB 2]
+           |     |--[PDB ...]
+           |
+
         :param predefined_fragments: user-definied fragments? Assumes fragments generated using 
         Fragments.generate_fragements_from_ligand()
         :return: 
@@ -96,35 +129,48 @@ class Fragments():
         InChIKey_to_PDB = pd.read_csv("./Additional_Files/Components-inchikey.tsv",
                                       delimiter="\t",
                                       names=["cmpdinchikey", "PDBID", "Name"])
-        # debug
-        pprint.pprint(InChIKey_to_PDB)
 
         # Perform fragment search through PubChem
         # I wanted to do this through the pubchempy API, but I can't get it to work for some reason
         # Falling back to manually doing the searches on Pubchem and downloading the detailed search results
         # Name each search using the SMILES string to simplify things
 
-        search_dir = "./{}".format(user_defined_dir)
+        search_dir = "./{}/Fragment_search_results".format(user_defined_dir)
 
         for search_query in os.listdir(search_dir):
-            # pubchem_search_results = pubchempy.get_compounds("N1C=CN=C1",
-            #                                                  searchtype='substructure',
-            #                                                  listkey_count=0,
-            #                                                  as_dataframe=True)
-            # pprint.pprint(pubchem_search_results)
-            print(os.path.join(user_defined_dir, search_query))
-            pubchem_results = pd.read_csv(os.path.join(user_defined_dir, search_query))
+            if search_query.endswith(".csv"):
+                # Using Pubchem API (if I could get it to work...)
+                # pubchem_search_results = pubchempy.get_compounds("N1C=CN=C1",
+                #                                                  searchtype='substructure',
+                #                                                  listkey_count=0,
+                #                                                  as_dataframe=True)
 
-            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='left', on='cmpdinchikey')
-            ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
+                # Make directory for each fragment
+                fragment_smiles = search_query.split('.')[0]
 
-            # todo: Add option to export PBD ligand matches
-            # ligands_in_pdb_df.to_csv('{}_pdb.csv'.format(search_query))
+                os.makedirs(os.path.join(user_defined_dir, "Fragment_PDB_Matches", fragment_smiles), exist_ok=True)
+                print(os.path.join("Fragment_PDB_Matches", fragment_smiles))
 
-            # Generate set of PDBIDs for fragment-containing ligands
-            pdbid_set = set(ligands_in_pdb_df['PDBID'])
-            print(pdbid_set)
+                pubchem_results = pd.read_csv(os.path.join(search_dir, search_query))
 
+                ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='left', on='cmpdinchikey')
+                ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
+
+                # todo: Add option to export PBD ligand matches
+                ligands_in_pdb_df.to_csv(os.path.join(user_defined_dir, "Fragment_PDB_Matches", fragment_smiles, '{}_pdb.csv'.format(search_query)))
+
+                # Generate set of PDBIDs for fragment-containing ligands
+                pdbid_set = set(ligands_in_pdb_df['PDBID'])
+                print(pdbid_set)
+                for ligand_pdbid in pdbid_set:
+                    self._download_PDBs(ligand_pdbid)
+
+    def _download_PDBs(self, ligand_pdbid):
+        """
+        Download all PDBs with the provided fragment-containing ligand
+        :param ligand_pdbid: three character PDBID for the fragment-containing ligand
+        :return: 
+        """
 
     def bootstrap_method(self):
         """
