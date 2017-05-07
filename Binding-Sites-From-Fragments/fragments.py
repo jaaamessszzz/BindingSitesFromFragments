@@ -52,8 +52,14 @@ class Fragments():
             be equivalent to the bonds defined as break points.
             
             EDIT: LOL this is not necessary if you explicitly specify hydrogens in the substructure search.
-            Unfortunately, the substructure search function on the PDB sucks. Pubchem works quite well, but now I need
-            a method of mapping fragment-containing small molecules to molecules present in the PDB.
+            Unfortunately, the substructure search function on the PDB sucks. Pubchem works quite well. I have found
+            that it is important to manually set the number of allowed neighbors/substituents for atoms so you don't
+            get branching from the specified atoms. This is done with the query atom tool in the PubChem Sketcher.
+            It seems that the all of this additional information is encoded in the SMILES string.
+            
+            https://pubchem.ncbi.nlm.nih.gov/sketch/sketchhelp.html#wp915615
+            
+            Now I need a method of mapping fragment-containing small molecules to molecules present in the PDB.
             
             http://ligand-expo.rcsb.org/ld-download.html
             > InChIKey (tab delimited text)
@@ -71,12 +77,17 @@ class Fragments():
             rotation/translation matrices. This would ensure all structures can be aligned with minimal amount of 
             user input and calculation time. Unfortunately, this will still require user input for mapping fragment 
             atoms to each fragment-containing small molecule...
+            
+            Actually I just thought of something. I know Kale may not like this idea, but if I limit the user to
+            defining fragments without any rotational DOFs, I should be able to define three points and the distances
+            between each. This should be constant for all fragment-containing small molecule matches and can be applied
+            to automatically aligning all matches. 
         
         :param predefined_fragments: user-definied fragments? Assumes fragments generated using 
         Fragments.generate_fragements_from_ligand()
         :return: 
         """
-        pass
+        fragment_list =
 
     def bootstrap_method(self):
         """
