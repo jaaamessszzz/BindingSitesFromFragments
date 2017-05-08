@@ -18,6 +18,38 @@ class Fragments():
     * Generate Fragments from Ligands
     * Query Pubchem or PDB for ligands containing defined fragments
     
+    * Directory Tree
+        
+    user_defined_dir
+    |--Fragment_search_results
+    |  |--[Fragment smiles 1].csv
+    |  |--[Fragment smiles 2].csv
+    |
+    |--Fragment_PDB_Matches
+       |--[Fragment smiles 1]
+       |  |--[Fragment smiles 1]_pdb.csv
+       |  |--[Ligand PDBID 1]
+       |  |  |--[PDB 1]
+       |  |  |--[PDB 2]
+       |  |  |--[PDB ...]
+       |  |
+       |  |--[Ligand PDBID 2]
+       |     |--[PDB 1]
+       |     |--[PDB 2]
+       |     |--[PDB ...]
+       |
+       |--[Fragment smiles 2]
+       |  |--[Fragment smiles 2]_pdb.csv
+       |  |--[Ligand PDBID]
+       |  |  |--[PDB 1]
+       |  |  |--[PDB 2]
+       |  |  |--[PDB ...]
+       |  |
+       |  |--[Ligand PDBID 2]
+       |     |--[PDB 1]
+       |     |--[PDB 2]
+       |     |--[PDB ...]
+                  
     """
     def __init__(self):
         self.fragment_list = None
@@ -87,39 +119,6 @@ class Fragments():
             defining fragments without any rotational DOFs, I should be able to define three points and the distances
             between each. This should be constant for all fragment-containing small molecule matches and can be applied
             to automatically aligning all matches. 
-        
-        * Directory Tree
-        
-        user_defined_dir
-        |--Fragment_search_results
-        |  |--[Fragment smiles 1].csv
-        |  |--[Fragment smiles 2].csv
-        |
-        |--Fragment_PDB_Matches
-           |--[Fragment smiles 1]
-           |  |--[Fragment smiles 1]_pdb.csv
-           |  |--[Ligand PDBID 1]
-           |  |  |--[PDB 1]
-           |  |  |--[PDB 2]
-           |  |  |--[PDB ...]
-           |  |
-           |  |--[Ligand PDBID 2]
-           |     |--[PDB 1]
-           |     |--[PDB 2]
-           |     |--[PDB ...]
-           |
-           |--[Fragment smiles 2]
-           |  |--[Fragment smiles 2]_pdb.csv
-           |  |--[Ligand PDBID]
-           |  |  |--[PDB 1]
-           |  |  |--[PDB 2]
-           |  |  |--[PDB ...]
-           |  |
-           |  |--[Ligand PDBID 2]
-           |     |--[PDB 1]
-           |     |--[PDB 2]
-           |     |--[PDB ...]
-           |
 
         :param predefined_fragments: user-definied fragments? Assumes fragments generated using 
         Fragments.generate_fragements_from_ligand()
@@ -171,6 +170,55 @@ class Fragments():
         :param ligand_pdbid: three character PDBID for the fragment-containing ligand
         :return: 
         """
+
+        REST_search_xml = """
+        <orgPdbCompositeQuery version="1.0">
+        <queryRefinement>
+        <queryRefinementLevel>0</queryRefinementLevel>
+        <orgPdbQuery>
+        <queryType>org.pdb.query.simple.ChemCompIdQuery</queryType>
+        <chemCompId>{}</chemCompId>
+        <polymericType>Any</polymericType>
+        </orgPdbQuery>
+        </queryRefinement>
+        <queryRefinement>
+        <queryRefinementLevel>1</queryRefinementLevel>
+        <conjunctionType>and</conjunctionType>
+        <orgPdbQuery>
+        <queryType>org.pdb.query.simple.HomologueReductionQuery</queryType>
+        <identityCutoff>70</identityCutoff>
+        </orgPdbQuery>
+        </queryRefinement>
+        </orgPdbCompositeQuery>
+        """.format(ligand_pdbid)
+
+        # REST_xml_dict = {
+        #     "queryRefinement":{
+        #         "queryRefinementLevel": 0,
+        #         "orgPdbQuery":{
+        #             "queryType": "org.pdb.query.simple.ChemCompIdQuery",
+        #             "chemCompId": ligand_pdbid,
+        #             "polymericType": "Any"
+        #         },
+        #     },
+        #     "queryRefinement":{
+        #         "conjunctionType": "and",
+        #         "queryRefinementLevel": 1,
+        #         "orgPdbQuery": {
+        #             "queryType": "org.pdb.query.simple.HomologueReductionQuery",
+        #             "identityCutoff": "70"
+        #         }
+        #     }
+        # }
+
+        search_xml = xmltodict.unparse(xmltodict.parse(REST_search_xml), pretty=False)
+        print(search_xml.encode())
+
+        search_request = urllib.request.Request('http://www.rcsb.org/pdb/rest/search', data=search_xml.encode())
+        search_result = urllib.request.urlopen(search_request).read()
+
+        pprint.pprint(str(search_result))
+
 
     def bootstrap_method(self):
         """
