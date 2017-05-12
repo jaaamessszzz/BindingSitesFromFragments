@@ -236,15 +236,24 @@ class Fragments():
                     try:
                         print("Downloading {}...".format(pdb_name))
                         pdb_string = pypdb.get_pdb_file(pdb_name, filetype='pdb')
-                        current_download = open(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), 'w')
-                        current_download.write(pdb_string)
-                        current_download.close()
+                        if self.verify_pdb_quality(pdb_name):
+                            current_download = open(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), 'w')
+                            current_download.write(pdb_string)
+                            current_download.close()
                     except Exception as e:
                         print(e)
                 else:
                     print(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), "exists! Moving on...")
 
-
+    def verify_pdb_quality(self, pdb_file):
+        """
+        Verify the quality of a PDB structure before downloading
+        Structures are not usable if:
+        * There are multiple occupancies for the target ligand
+        * There are multiple binding sites in one chain for the target ligand (suggests non-specific binding)
+        :return: 
+        """
+        return True
 
 
 

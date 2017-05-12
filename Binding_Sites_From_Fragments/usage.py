@@ -48,9 +48,10 @@ Options:
 """
 import docopt
 import os
+import sys
+import pprint
 from .fragments import Fragments
 from .alignments import Alignments
-
 
 def main():
 
@@ -71,23 +72,23 @@ def main():
         frag.search_for_fragment_containing_ligands()
 
     if args['align']:
-        # Get three-letter ligand code from pdb/mol file in inputs directory
-        # todo: remember why I wrote this...
-        for file in os.listdir(os.path.join(working_directory, 'Inputs')):
-            if file.endswith('.pdb'):
-                three_letter_code = file.split('.')[0]
-
         # For each fragment, align all fragment-containing ligands to fragment
         # Generate PDBs with aligned coordinate systems
 
         # Fragment_1, Fragment_2, ...
         for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
+            fragment_pdb = os.path.join(working_directory, 'Inputs')
+
             # Three-letter codes for fragment-containing compounds
             for fcc in directory_check(fragment):
                 # Each PDB containing a fragment-containing compound
                 for pdb in pdb_check(fcc):
-                    align.extract_atoms_and_connectivities('TEP', pdb)
-                    break
+                    ligand = os.path.basename(os.path.normpath(fcc))
+                    # ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
+                    ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
+                    pprint.pprint(ligand_records)
+                    sys.exit()
+
 
 
 def directory_check(dir):
