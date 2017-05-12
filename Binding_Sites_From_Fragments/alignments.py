@@ -13,6 +13,7 @@ import networkx
 import prody
 from rdkit import Chem
 from rdkit.Chem import rdFMCS
+import io
 
 
 class Alignments():
@@ -27,7 +28,6 @@ class Alignments():
         self.user_defined_dir = user_defined_dir
 
 
-
     def fragment_target_mapping(self, fragment_pdb, target_string):
         """
         I'm going to utilize NetworkX (shoutout to Kale) for mapping fragment atoms to the corresponding atoms in each
@@ -40,7 +40,7 @@ class Alignments():
         more streamlined method of doing this without needing to resort to subgraphs...
         > https://sourceforge.net/p/rdkit/mailman/message/34549645/
         
-        :return: 
+        :return: dict mapping fragment atoms to target atoms
         """
         # todo: make sure hydrogens aren't being stripped, this will mess up mapping
         # Import fragment and target ligand
@@ -56,12 +56,11 @@ class Alignments():
         target_matches = target_mol.GetSubstructMatch(sub_mol)
 
         # todo: figure out how to represent mapping efficiently
-        for f_idx, t_idx in zip(frag_matches, target_matches):
-            print(t_idx, target_mol.GetAtomWithIdx(t_idx).GetSymbol(), f_idx, fragment_mol.GetAtomWithIdx(f_idx).GetSymbol())
+        # Maps fragment atom index to target atom index
+        fragment_target_mapping = {f_idx: t_idx for f_idx, t_idx in zip(frag_matches, target_matches)}
 
-        print(target_string)
-        for line in open(fragment_pdb):
-            print(line)
+        return fragment_target_mapping
+
 
     def generate_graph_from_pdb(self, pdb_file):
         """
@@ -131,11 +130,26 @@ class Alignments():
         pass
 
 
-    def determine_rotation_and_translation(self):
+    def determine_rotation_and_translation(self, fragment_target_mapping, fragment_pdb, target_string):
         """
         Implementing the Kabsch algorithm for aligning all fragment-containing small molecules to the target ligand
         on the mapped atoms as determined by fragment_target_mapping()
         
-        :return: 
+        :return: Prody transformation object with rotation and translation matrix/vector
         """
-        pass
+        # Fragment and target as prody atom objects
+        # Fortunately the atom indicies used in the atom mapping with RDKit match prody indicies
+        # It's literally the line number of the HETATM records indexed starting at 0
+        target_prody = prody.parsePDBStream(io.StringIO(target_string))
+        fragment_prody = prody.parsePDB(fragment_pdb)
+
+        frag_inx_string = [str(a) for a in fragment_target_mapping.keys()]
+        trgt_inx_string = [str(a) for a in fragment_target_mapping.values()]
+
+        target_align_atoms = target_prody.select('index ' + ' '.join(trgt_inx_string))
+        fragment_align_atoms = fragment_prody.select('index ' + ' '.join(frag_inx_string))
+
+        print(len(target_align_atoms))
+        print(len(fragment_align_atoms))
+
+        return prody.calcTransformation(target_align_atoms, fragment_align_atoms)

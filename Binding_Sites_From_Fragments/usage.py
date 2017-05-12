@@ -90,7 +90,12 @@ def main():
                     ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
 
                     # Mapping of fragment atoms to target ligand atoms
-                    align.fragment_target_mapping(os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment)), ligand_records)
+                    pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                    fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+
+                    # Determine translation vector and rotation matrix
+                    move_things = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
+                    print(move_things)
                     sys.exit()
 
 def directory_check(dir):
