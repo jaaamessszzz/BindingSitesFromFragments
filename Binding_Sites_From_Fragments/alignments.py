@@ -11,7 +11,9 @@ import urllib
 import os
 import networkx
 import prody
-import biopandas
+from rdkit import Chem
+from rdkit.Chem import rdFMCS
+
 
 class Alignments():
     """
@@ -26,7 +28,7 @@ class Alignments():
 
 
 
-    def fragment_target_mapping(self):
+    def fragment_target_mapping(self, fragment_pdb, target_string):
         """
         I'm going to utilize NetworkX (shoutout to Kale) for mapping fragment atoms to the corresponding atoms in each
         of the fragment-containing small molecules. [http://networkx.readthedocs.io]
@@ -40,7 +42,26 @@ class Alignments():
         
         :return: 
         """
-        pass
+        # todo: make sure hydrogens aren't being stripped, this will mess up mapping
+        # Import fragment and target ligand
+        fragment_mol = Chem.MolFromPDBFile(fragment_pdb)
+        target_mol = Chem.MolFromPDBBlock(target_string)
+
+        # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
+        substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol])
+        sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
+
+        # Return atom indicies of substructure matches for fragment and target
+        frag_matches = fragment_mol.GetSubstructMatch(sub_mol)
+        target_matches = target_mol.GetSubstructMatch(sub_mol)
+
+        # todo: figure out how to represent mapping efficiently
+        for f_idx, t_idx in zip(frag_matches, target_matches):
+            print(t_idx, target_mol.GetAtomWithIdx(t_idx).GetSymbol(), f_idx, fragment_mol.GetAtomWithIdx(f_idx).GetSymbol())
+
+        print(target_string)
+        for line in open(fragment_pdb):
+            print(line)
 
     def generate_graph_from_pdb(self, pdb_file):
         """
@@ -63,7 +84,7 @@ class Alignments():
         
         :param ligand: Three letter code for fragment-containing ligand
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
-        :return: list HETAM and CONECT records from the input pdb for the given ligand
+        :return: String of HETAM and CONECT records from the input pdb for the given ligand
         """
 
         # Determine which chains have my target ligand
@@ -96,7 +117,8 @@ class Alignments():
                         line_list.append(line)
                         break
 
-        return line_list
+        ligand_io = ''.join(line_list)
+        return ligand_io
 
 
     def clean_pdbs(self):

@@ -78,18 +78,20 @@ def main():
         # Fragment_1, Fragment_2, ...
         for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
             fragment_pdb = os.path.join(working_directory, 'Inputs')
+            current_fragment = os.path.basename(fragment)
 
             # Three-letter codes for fragment-containing compounds
             for fcc in directory_check(fragment):
                 # Each PDB containing a fragment-containing compound
                 for pdb in pdb_check(fcc):
                     ligand = os.path.basename(os.path.normpath(fcc))
-                    # ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
+
+                    # Extract HETATM and CONECT records for the target ligand
                     ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
-                    pprint.pprint(ligand_records)
+
+                    # Mapping of fragment atoms to target ligand atoms
+                    align.fragment_target_mapping(os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment)), ligand_records)
                     sys.exit()
-
-
 
 def directory_check(dir):
     for subdir in os.listdir(dir):
