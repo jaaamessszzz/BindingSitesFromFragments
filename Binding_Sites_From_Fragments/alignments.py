@@ -43,10 +43,8 @@ class Alignments():
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: List of all ligand HETATM records
         """
-
-        time.sleep(0.05)
-
-        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand))
+        time.sleep(0.1)
+        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand), stream=False)
         soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
 
 
@@ -61,7 +59,8 @@ class Alignments():
         :param ligand: 
         :return: 
         """
-        ideal_pdb_text = requests.get('http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand)).text
+        time.sleep(0.1)
+        ideal_pdb_text = requests.get('http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand), stream=False).text
         return prody.parsePDBStream(io.StringIO(ideal_pdb_text))
 
 
@@ -89,11 +88,12 @@ class Alignments():
 
                 # Report
                 lig_request_suffix = item
-                print("\n Using: {}".format(lig_request_suffix))
+                print("\n Checking: {}".format(lig_request_suffix))
 
                 # Get ligand record from LigExpo
-                time.sleep(0.05)
-                full_lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix)).text
+                time.sleep(0.1)
+                full_lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
+                                                stream=False).text
                 chain = lig_request_suffix.split('_')[3]
 
                 print(full_lig_request)
@@ -103,17 +103,33 @@ class Alignments():
                 # with low affinity and specificity
                 cleaned_target, multiple_occupancies = self.clean_ligand_HETATM_records(full_lig_request)
 
+                print('Multiple Occupancies')
+                print(multiple_occupancies)
                 if not multiple_occupancies:
-                    
-                    ligexpo_ligand = prody.parsePDBStream(io.StringIO(full_lig_request))
+
+                    # ligexpo_ligand = prody.parsePDBStream(io.StringIO(full_lig_request))
+                    # Literally going line by line to count atoms...
+                    # prody is unable to parse empty pdb files, although who would even think to test that
+                    atom_count = 0
+                    for line in full_lig_request.split('\n'):
+                        if line[:6] == 'HETATM' and line[77].strip() != 'H':
+                            atom_count += 1
 
                     # Compare ideal to ligand pulled from Ligand Expo
                     # If the number of atoms are the same, good enough for me (at the moment)
-                    if ligexpo_ligand.numAtoms() == self.ideal_ligand_pdb.numAtoms():
+                    if atom_count == self.ideal_ligand_pdb.select('not hydrogen').numAtoms():
 
-                        return reject, full_lig_request, chain
+                        # Verify whether I can actually open it with Prody...
+                        try:
+                            prody.parsePDBStream(io.StringIO(full_lig_request))
+                            return reject, full_lig_request, chain
+
+                        except Exception as e:
+                            print(e)
+                            continue
 
         # If I can't find any ligands fully represented, reject this PDB
+        print('\n\n{} REJECTED! SAD!\n\n'.format(pdbid))
         return True, None, None
 
 
@@ -150,7 +166,7 @@ class Alignments():
 
         # todo: figure out how to represent mapping efficiently
         # Maps fragment atom index to target atom index
-        fragment_target_mapping = {f_idx: t_idx for f_idx, t_idx in zip(frag_matches, target_matches)}
+        fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches)]
 
         return fragment_target_mapping
 
@@ -191,12 +207,19 @@ class Alignments():
 
         print(fragment_target_mapping)
 
-        trgt_inx_string = [str(a) for a in fragment_target_mapping.values()]
-        frag_inx_string = [str(a) for a in fragment_target_mapping.keys()]
+        # For Reference:
+        # fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches)]
+        frag_inx_string = [str(a[0]) for a in fragment_target_mapping]
+        trgt_inx_string = [str(b[1]) for b in fragment_target_mapping]
 
         # Debugging
         print(frag_inx_string)
         print(trgt_inx_string)
+
+        # So after inspecting the aligned structures, I've found that the wrong atoms are being aligned...
+        # The atoms are currently ordered from highest to lowest according to index... need to change that so that the
+        # orders instead agree with the atom mappings
+        # I'll need to assemble the matrices by hand it seems.
 
         target_align_atoms = target_prody.select('index ' + ' '.join(trgt_inx_string))
         for atom in target_align_atoms:
@@ -262,7 +285,7 @@ class Alignments():
         :return: 
         """
         # Only work with residues within 8A of target ligand
-        target_pdb = prody.parsePDB(target_pdb_path, altloc=True)
+        target_pdb = prody.parsePDB(target_pdb_path)
         target_shell = target_pdb.select('within 8 of (resname {} and chain {})'.format(ligand, ligand_chain))
 
         # todo: implement this in usage so it only has to be done once...
