@@ -63,7 +63,6 @@ def main():
         working_directory = os.path.curdir
 
     frag = Fragments(working_directory)
-    align = Alignments(working_directory)
 
     if args['generate_fragments']:
         frag.generate_fragements_from_ligand(args['<ligand>'])
@@ -82,21 +81,32 @@ def main():
 
             # Three-letter codes for fragment-containing compounds
             for fcc in directory_check(fragment):
+
+                ligand = os.path.basename(os.path.normpath(fcc))
+                align = Alignments(working_directory, current_fragment, ligand)
+
                 # Each PDB containing a fragment-containing compound
                 for pdb in pdb_check(fcc):
-                    ligand = os.path.basename(os.path.normpath(fcc))
 
                     # Extract HETATM and CONECT records for the target ligand
-                    ligand_records = align.extract_atoms_and_connectivities(ligand, pdb)
+                    # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
+                    reject, ligand_records, ligand_chain = align.fetch_specific_ligand_record(pdb)
 
-                    # Mapping of fragment atoms to target ligand atoms
-                    pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
-                    fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+                    # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
+                    if not reject:
 
-                    # Determine translation vector and rotation matrix
-                    move_things = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
-                    print(move_things)
-                    sys.exit()
+                        # Mapping of fragment atoms to target ligand atoms
+                        pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                        fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+
+                        # Determine translation vector and rotation matrix
+                        transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
+                        print(transformation_matrix.getMatrix())
+
+                        # Apply transformation to protein_ligand complex
+                        align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
+
+            sys.exit()
 
 def directory_check(dir):
     for subdir in os.listdir(dir):

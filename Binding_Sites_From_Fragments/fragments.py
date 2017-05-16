@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pypdb
 import pubchempy
-from Bio import PDB
 import xmltodict
 import pprint
 import urllib

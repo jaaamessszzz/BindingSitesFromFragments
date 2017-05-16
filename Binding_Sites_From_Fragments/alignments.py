@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 
-import numpy as np
-import pandas as pd
-import pypdb
-import pubchempy
-import xmltodict
-import yaml
-import pprint
-import urllib
 import os
-import networkx
 import prody
 from rdkit import Chem
 from rdkit.Chem import rdFMCS
 import io
+from bs4 import BeautifulSoup
+import requests
+import sys
+import time
 
 
 class Alignments():
@@ -24,8 +19,102 @@ class Alignments():
     Chris suggests looking into a package called RDKit for manipulating SMILES strings and structures
     
     """
-    def __init__(self, user_defined_dir):
+    def __init__(self, user_defined_dir, fragment, ligand):
         self.user_defined_dir = user_defined_dir
+        self.fragment = fragment
+        self.ligand = ligand.upper()
+        self.ligexpo_list = self.fetch_ligand_records(self.ligand)
+        self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
+
+        # http://ligand-expo.rcsb.org/reports/4/4MZ/4MZ_ideal.pdb
+
+
+    def fetch_ligand_records(self, ligand):
+        """
+        Retrieves ligand records from LigandExpo
+        
+        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
+        structure in the PDB using LigandExpo as outlined here:
+        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
+        
+        This might be the way to go since it removes the need for all this parsing...
+        
+        :param ligand: Three letter code for fragment-containing ligand
+        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
+        :return: List of all ligand HETATM records
+        """
+
+        time.sleep(0.05)
+
+        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand))
+        soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
+
+
+        return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
+
+
+    def fetch_ideal_pdb(self, ligand):
+        """
+        Get the ideal pdb for the target ligand. This is used to check that all atoms are present in target ligands
+        extracted from bound proteins
+        
+        :param ligand: 
+        :return: 
+        """
+        ideal_pdb_text = requests.get('http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand)).text
+        return prody.parsePDBStream(io.StringIO(ideal_pdb_text))
+
+
+    def fetch_specific_ligand_record(self, pdb_file):
+        """
+        Fetch a specific ligand record from ligand expo
+        
+        :return: 
+        """
+        # todo: determine whether this is okay after assuming all PDBs are cleaned and determined usable...
+        # Grab the first ligand from the pdb
+
+        # I have determined this is definitely not okay...
+        # Case in point: http://ligand-expo.rcsb.org/files/4/4MZ/ipdb/1keq_4MZ_1_A_350__F__D_.ipdb
+        # It is empty. What. Why.
+
+        reject = False
+
+        # Go through all ligands bound to PDBs
+        pdbid = os.path.basename(os.path.normpath(pdb_file)).split('.')[0]
+        for item in self.ligexpo_list:
+
+            # For my specific ligand of interest bound to the correct PDB...
+            if pdbid.lower() in item:
+
+                # Report
+                lig_request_suffix = item
+                print("\n Using: {}".format(lig_request_suffix))
+
+                # Get ligand record from LigExpo
+                time.sleep(0.05)
+                full_lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix)).text
+                chain = lig_request_suffix.split('_')[3]
+
+                print(full_lig_request)
+
+                # Determine whether there are multiple occupancies for the target ligand
+                # I am going to avoid using ligands with multiple occupancies as this suggests binding conformations
+                # with low affinity and specificity
+                cleaned_target, multiple_occupancies = self.clean_ligand_HETATM_records(full_lig_request)
+
+                if not multiple_occupancies:
+                    
+                    ligexpo_ligand = prody.parsePDBStream(io.StringIO(full_lig_request))
+
+                    # Compare ideal to ligand pulled from Ligand Expo
+                    # If the number of atoms are the same, good enough for me (at the moment)
+                    if ligexpo_ligand.numAtoms() == self.ideal_ligand_pdb.numAtoms():
+
+                        return reject, full_lig_request, chain
+
+        # If I can't find any ligands fully represented, reject this PDB
+        return True, None, None
 
 
     def fragment_target_mapping(self, fragment_pdb, target_string):
@@ -42,6 +131,10 @@ class Alignments():
         
         :return: dict mapping fragment atoms to target atoms
         """
+        # Debugging
+        print(target_string)
+        print(fragment_pdb)
+
         # todo: make sure hydrogens aren't being stripped, this will mess up mapping
         # Import fragment and target ligand
         fragment_mol = Chem.MolFromPDBFile(fragment_pdb)
@@ -73,53 +166,6 @@ class Alignments():
         pass
 
 
-    def extract_atoms_and_connectivities(self, ligand, pdb_file):
-        """
-        Extract information on atoms and connectivities for a fragment-containing small molecule.
-        
-        Biopython is a pain in the ass
-        BioPandas doesn't handle CONECT records
-        Prody doesn't handle CONECT records
-        
-        :param ligand: Three letter code for fragment-containing ligand
-        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
-        :return: String of HETAM and CONECT records from the input pdb for the given ligand
-        """
-
-        # Determine which chains have my target ligand
-        ag = prody.parsePDB(pdb_file)
-        ag_ligands = ag.select('resname {}'.format(ligand))
-
-        # Pick a chain and extract the target ligand... arbitrarily picks the first chain for now
-        chain = ag_ligands.getChids()[0]
-
-        # I only need CONECT and HETATM records for my ligand
-        # This function assumes that all CONECT records will be at the very end of the PDB file
-        pdb = open(pdb_file)
-        line_list = []
-
-        # Store HETAM lines for the ligand
-        HETAM_num_list = []
-
-        for line in pdb:
-            split_line = line.split()
-            if split_line[0] == 'HETATM' and split_line[3] == ligand and split_line[4] == chain:
-                line_list.append(line)
-
-                # Keep track of HETAM numbers so I know which CONET lines to pull
-                HETAM_num_list.append(line.split()[1])
-
-            # Save CONECT records if they reference one of the HETAMs in my ligand
-            if line.split()[0] == 'CONECT':
-                for element in line.split()[1:]:
-                    if element in HETAM_num_list:
-                        line_list.append(line)
-                        break
-
-        ligand_io = ''.join(line_list)
-        return ligand_io
-
-
     def clean_pdbs(self):
         """
         Clean up PDBs for fragment alignments.
@@ -143,13 +189,167 @@ class Alignments():
         target_prody = prody.parsePDBStream(io.StringIO(target_string))
         fragment_prody = prody.parsePDB(fragment_pdb)
 
-        frag_inx_string = [str(a) for a in fragment_target_mapping.keys()]
+        print(fragment_target_mapping)
+
         trgt_inx_string = [str(a) for a in fragment_target_mapping.values()]
+        frag_inx_string = [str(a) for a in fragment_target_mapping.keys()]
+
+        # Debugging
+        print(frag_inx_string)
+        print(trgt_inx_string)
 
         target_align_atoms = target_prody.select('index ' + ' '.join(trgt_inx_string))
+        for atom in target_align_atoms:
+            print(atom)
         fragment_align_atoms = fragment_prody.select('index ' + ' '.join(frag_inx_string))
-
-        print(len(target_align_atoms))
-        print(len(fragment_align_atoms))
-
+        for atom in fragment_align_atoms:
+            print(atom)
         return prody.calcTransformation(target_align_atoms, fragment_align_atoms)
+
+
+    def clean_ligand_HETATM_records(self, target_string):
+        """
+        Removes alternate location indicators...
+        :param target_string: 
+        :return: 
+        """
+        cleaned_target = ''
+        multiple_occupancies = False
+        target_string_split = target_string.split('\n')
+        for line in target_string_split:
+            if line[:6] == 'HETATM':
+
+                if line[16:17] != ' ':
+                    multiple_occupancies = True
+                    break
+
+                HETATM = line[:6]
+                Serial = line[7:11].strip()
+                Atom_Name = line[13:16].strip()
+                Residue_Name = line[17:20].strip()
+                Chain_ID = line[21:22].strip()
+                ResSeq_ID = line[23:26].strip()
+                x = line[31:38].strip()
+                y = line[39:46].strip()
+                z = line[47:54].strip()
+                Occupancy = line[55:60].strip()
+                Temperature = line[61:66].strip()
+                Element_Symbol = line[77].strip()
+
+                cleaned_line = '{0:<6} {1:4} {2:>4} {3:3} {4}{5:>4}    {6:>8}{7:>8}{8:>8}{9:>6}{10:>6}         {11}\n'\
+                    .format(HETATM, Serial, Atom_Name, Residue_Name, Chain_ID, ResSeq_ID, x, y, z, Occupancy,
+                            Temperature, Element_Symbol)
+                cleaned_target += cleaned_line
+
+            else:
+                cleaned_target += line
+                cleaned_target += '\n'
+
+        return cleaned_target, multiple_occupancies
+
+
+
+    def apply_transformation(self, transformation_matrix, target_pdb_path, ligand, ligand_chain):
+        """
+        Apply transformation to the target ligand-protein complex.
+        
+        Also considering:
+        * Only work with residues with CA within 8A of ligand
+        * Write all transformed PDBs to a new working directory?
+        
+        :param transformation_matrix: 
+        :param target_pdb: 
+        :return: 
+        """
+        # Only work with residues within 8A of target ligand
+        target_pdb = prody.parsePDB(target_pdb_path, altloc=True)
+        target_shell = target_pdb.select('within 8 of (resname {} and chain {})'.format(ligand, ligand_chain))
+
+        # todo: implement this in usage so it only has to be done once...
+        # Create directory for processed PDBs
+        processed_PDBs_path = os.path.join(self.user_defined_dir, 'Transformed_Aligned_PDBs', self.fragment)
+        os.makedirs(processed_PDBs_path, exist_ok=True)
+
+        PDBID = os.path.basename(os.path.normpath(target_pdb_path)).split('.')[0]
+
+        transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
+        prody.writePDB(os.path.join(processed_PDBs_path, '{}_processed.pdb'.format(PDBID)), transformed_pdb)
+
+        print(target_shell)
+
+
+    ####################################################################################################################
+    #
+    #  Everything below this block is depreciated or has been replaced!
+    #
+    ####################################################################################################################
+
+
+    def extract_atoms_and_connectivities(self, ligand, pdb_file):
+        """
+        Extract information on atoms and connectivities for a fragment-containing small molecule.
+
+        Biopython is a pain in the ass
+        BioPandas doesn't handle CONECT records
+        Prody doesn't handle CONECT records
+
+        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
+        structure in the PDB using LigandExpo as outlined here:
+        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
+
+        This might be the way to go since it removes the need for all this parsing...
+
+        :param ligand: Three letter code for fragment-containing ligand
+        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
+        :return: String of HETAM and CONECT records from the input pdb for the given ligand
+        """
+
+        # Debugging
+        print(pdb_file)
+
+        # todo: remove redundant parsePDB()... don't need to be parsing the same PDB multiple times
+        # Determine which chains have my target ligand
+        ag = prody.parsePDB(pdb_file)
+        ag_ligands = ag.select('resname {}'.format(ligand))
+
+        # Pick a chain and extract the target ligand... arbitrarily picks the first chain for now
+        chain = ag_ligands.getChids()[0]
+
+        # Debugging
+        print(ag_ligands)
+        print(chain)
+        for atom in ag_ligands:
+            print(atom.getChid())
+        print(ligand)
+        print(type(ligand))
+
+        # I only need CONECT and HETATM records for my ligand
+        # This function assumes that all CONECT records will be at the very end of the PDB file
+        pdb = open(pdb_file)
+        line_list = []
+
+        # Store HETAM lines for the ligand
+        HETAM_num_list = []
+
+        for line in pdb:
+            split_line = line.split()
+
+            if split_line[0] == 'HETATM' and split_line[3] == ligand and split_line[4][0] == chain:
+                line_list.append(line)
+
+                # Keep track of HETAM numbers so I know which CONET lines to pull
+                HETAM_num_list.append(line.split()[1])
+
+            # Save CONECT records if they reference one of the HETAMs in my ligand
+            if line.split()[0] == 'CONECT':
+                for element in line.split()[1:]:
+                    if element in HETAM_num_list:
+                        line_list.append(line)
+                        break
+
+        ligand_io = ''.join(line_list)
+
+        # Debugging
+        print(ligand_io)
+
+        return ligand_io, chain
