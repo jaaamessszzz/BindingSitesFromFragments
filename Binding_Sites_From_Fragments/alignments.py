@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import requests
 import sys
 import time
+import numpy as np
 
 
 class Alignments():
@@ -221,13 +222,23 @@ class Alignments():
         # orders instead agree with the atom mappings
         # I'll need to assemble the matrices by hand it seems.
 
-        target_align_atoms = target_prody.select('index ' + ' '.join(trgt_inx_string))
-        for atom in target_align_atoms:
-            print(atom)
-        fragment_align_atoms = fragment_prody.select('index ' + ' '.join(frag_inx_string))
-        for atom in fragment_align_atoms:
-            print(atom)
-        return prody.calcTransformation(target_align_atoms, fragment_align_atoms)
+        frag_atom_selections = [fragment_prody.select('index {}'.format(index)) for index in frag_inx_string]
+        trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in trgt_inx_string]
+
+        print(frag_atom_selections)
+        print(trgt_atom_selections)
+
+        frag_atom_coords = np.asarray([atom.getCoords()[0] for atom in frag_atom_selections])
+        trgt_atom_coords = np.asarray([atom.getCoords()[0] for atom in trgt_atom_selections])
+
+        print(frag_atom_coords)
+        print(trgt_atom_coords)
+
+        # fragment_align_atoms = fragment_prody.select('index ' + ' '.join(frag_inx_string))
+        # for atom in fragment_align_atoms:
+        #     print(atom)
+
+        return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
 
     def clean_ligand_HETATM_records(self, target_string):
