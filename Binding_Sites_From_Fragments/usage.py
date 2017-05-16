@@ -74,39 +74,74 @@ def main():
         # For each fragment, align all fragment-containing ligands to fragment
         # Generate PDBs with aligned coordinate systems
 
+        # Import list of ligands to exclude from processing
+        # Three-letter ligand codes (UPPER CASE)
+        # e.g. IMD, so much randomly bound IMD everywhere
+        exclude_ligand_list = []
+        exclude_txt = os.path.join(working_directory, 'Inputs', 'Exclude_ligands.txt')
+        if os.path.exists(exclude_txt):
+            with open(exclude_txt, 'r') as exlude_ligands:
+                exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
+
         # Fragment_1, Fragment_2, ...
         for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
             fragment_pdb = os.path.join(working_directory, 'Inputs')
             current_fragment = os.path.basename(fragment)
 
+            # Create directory for processed PDBs
+            processed_PDBs_path = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
+            os.makedirs(processed_PDBs_path, exist_ok=True)
+
             # Three-letter codes for fragment-containing compounds
             for fcc in directory_check(fragment):
-
                 ligand = os.path.basename(os.path.normpath(fcc))
-                align = Alignments(working_directory, current_fragment, ligand)
 
-                # Each PDB containing a fragment-containing compound
-                for pdb in pdb_check(fcc):
+                # Check if ligand is in exclusion list
+                if ligand not in exclude_ligand_list:
 
-                    # Extract HETATM and CONECT records for the target ligand
-                    # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-                    reject, ligand_records, ligand_chain = align.fetch_specific_ligand_record(pdb)
+                    align = Alignments(working_directory, current_fragment, ligand, processed_PDBs_path)
 
-                    # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
-                    if not reject:
+                    # Each PDB containing a fragment-containing compound
+                    for pdb in pdb_check(fcc):
+                        pdbid = os.path.basename(os.path.normpath(pdb)) # ASDF.pdb
 
-                        # Mapping of fragment atoms to target ligand atoms
-                        pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
-                        fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+                        # Check if PDB has already been processed
+                        rejected_list_path = os.path.join(processed_PDBs_path, 'rejected_PDBs.txt')
+                        rejected_list = []
+                        if os.path.exists(rejected_list_path):
+                            with open(rejected_list_path, 'r') as rejected_PDBs:
+                                rejected_list = [pdb.strip() for pdb in rejected_PDBs]
 
-                        # Determine translation vector and rotation matrix
-                        transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
-                        print(transformation_matrix.getMatrix())
+                        processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
 
-                        # Apply transformation to protein_ligand complex
-                        align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
+                        if not processed_check(processed_dir, pdbid, rejected_list):
 
-            sys.exit()
+                            # Extract HETATM and CONECT records for the target ligand
+                            # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
+                            reject, ligand_records, ligand_chain = align.fetch_specific_ligand_record(pdb)
+
+                            # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
+                            if reject:
+                                with open(rejected_list_path, 'a+') as reject_list:
+                                    reject_list.write('{}\n'.format(pdbid))
+
+                            # Continue if PDB has not been processed, rejected, or excluded by the user
+                            else:
+
+                                # Mapping of fragment atoms to target ligand atoms
+                                pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                                fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+
+                                # Determine translation vector and rotation matrix
+                                transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
+                                print(transformation_matrix.getMatrix())
+
+                                # Apply transformation to protein_ligand complex
+                                align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
+
+                        else:
+                            print('{} exists!'.format(pdb))
+            # sys.exit()
 
 def directory_check(dir):
     for subdir in os.listdir(dir):
@@ -120,3 +155,11 @@ def pdb_check(dir):
         path = os.path.join(dir, file)
         if path.endswith('.pdb'):
             yield path
+
+def processed_check(processed_dir, pdb, rejected_list):
+    pdbid = pdb.split('.')[0].upper()
+
+    in_reject_list = any([pdb == reject for reject in rejected_list])
+    already_processed = os.path.exists(os.path.join(processed_dir, '{}_processed.pdb'.format(pdbid)))
+
+    return any([in_reject_list, already_processed])

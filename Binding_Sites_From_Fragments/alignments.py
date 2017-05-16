@@ -20,12 +20,13 @@ class Alignments():
     Chris suggests looking into a package called RDKit for manipulating SMILES strings and structures
     
     """
-    def __init__(self, user_defined_dir, fragment, ligand):
+    def __init__(self, user_defined_dir, fragment, ligand, processed_PDBs_path):
         self.user_defined_dir = user_defined_dir
         self.fragment = fragment
         self.ligand = ligand.upper()
         self.ligexpo_list = self.fetch_ligand_records(self.ligand)
         self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
+        self.processed_PDBs_path = processed_PDBs_path
 
         # http://ligand-expo.rcsb.org/reports/4/4MZ/4MZ_ideal.pdb
 
@@ -39,6 +40,9 @@ class Alignments():
         http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
         
         This might be the way to go since it removes the need for all this parsing...
+        
+        20170516: So I've found that free amino acids such as HIS are not retrievable using LigandExpo in this manner...
+        I'm going to need to find a solution for this. 
         
         :param ligand: Three letter code for fragment-containing ligand
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
@@ -57,8 +61,8 @@ class Alignments():
         Get the ideal pdb for the target ligand. This is used to check that all atoms are present in target ligands
         extracted from bound proteins
         
-        :param ligand: 
-        :return: 
+        :param ligand: Three letter code for the desired ligand (upper case!!)
+        :return: io.StringIO for pdb of ligand retrieved from LigandExpo
         """
         time.sleep(0.1)
         ideal_pdb_text = requests.get('http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand), stream=False).text
@@ -69,11 +73,9 @@ class Alignments():
         """
         Fetch a specific ligand record from ligand expo
         
+        :param pdb_file: path to the specific pdb file containing the desired ligand
         :return: 
         """
-        # todo: determine whether this is okay after assuming all PDBs are cleaned and determined usable...
-        # Grab the first ligand from the pdb
-
         # I have determined this is definitely not okay...
         # Case in point: http://ligand-expo.rcsb.org/files/4/4MZ/ipdb/1keq_4MZ_1_A_350__F__D_.ipdb
         # It is empty. What. Why.
@@ -120,9 +122,12 @@ class Alignments():
                     # If the number of atoms are the same, good enough for me (at the moment)
                     if atom_count == self.ideal_ligand_pdb.select('not hydrogen').numAtoms():
 
-                        # Verify whether I can actually open it with Prody...
+                        # todo: find a more elegant way of testing if prody can open these
+                        # Verify whether I can actually open the ligand pdb with Prody...
                         try:
                             prody.parsePDBStream(io.StringIO(full_lig_request))
+                            # Test the source protein-ligand complex PDB at the same time...
+                            prody.parsePDB(pdb_file)
                             return reject, full_lig_request, chain
 
                         except Exception as e:
@@ -130,7 +135,7 @@ class Alignments():
                             continue
 
         # If I can't find any ligands fully represented, reject this PDB
-        print('\n\n{} REJECTED! SAD!\n\n'.format(pdbid))
+        print('\n{} REJECTED! SAD!\n'.format(pdbid))
         return True, None, None
 
 
@@ -234,10 +239,6 @@ class Alignments():
         print(frag_atom_coords)
         print(trgt_atom_coords)
 
-        # fragment_align_atoms = fragment_prody.select('index ' + ' '.join(frag_inx_string))
-        # for atom in fragment_align_atoms:
-        #     print(atom)
-
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
 
@@ -299,15 +300,10 @@ class Alignments():
         target_pdb = prody.parsePDB(target_pdb_path)
         target_shell = target_pdb.select('within 8 of (resname {} and chain {})'.format(ligand, ligand_chain))
 
-        # todo: implement this in usage so it only has to be done once...
-        # Create directory for processed PDBs
-        processed_PDBs_path = os.path.join(self.user_defined_dir, 'Transformed_Aligned_PDBs', self.fragment)
-        os.makedirs(processed_PDBs_path, exist_ok=True)
-
         PDBID = os.path.basename(os.path.normpath(target_pdb_path)).split('.')[0]
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
-        prody.writePDB(os.path.join(processed_PDBs_path, '{}_processed.pdb'.format(PDBID)), transformed_pdb)
+        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}_processed.pdb'.format(PDBID)), transformed_pdb)
 
         print(target_shell)
 
