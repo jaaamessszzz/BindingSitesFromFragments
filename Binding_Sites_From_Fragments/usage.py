@@ -131,7 +131,7 @@ def main():
 
                                 # Mapping of fragment atoms to target ligand atoms
                                 pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
-                                fragment_target_mapping = align.fragment_target_mapping(pdb_path, ligand_records)
+                                fragment_target_mapping, target_mol_PDB_Block = align.fragment_target_mapping(pdb_path, ligand_records)
 
                                 # Debugging
                                 # For some reason 3dyb_AD0_1_A_500__B___.ipdb cannot be imported with RDKit...
@@ -140,7 +140,7 @@ def main():
                                     continue
 
                                 # Determine translation vector and rotation matrix
-                                transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
+                                transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, target_mol_PDB_Block)
                                 # print(transformation_matrix.getMatrix())
 
                                 # Apply transformation to protein_ligand complex

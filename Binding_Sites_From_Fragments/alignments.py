@@ -40,7 +40,7 @@ class Alignments():
         :param ligand: Three letter code for the desired ligand (upper case!!)
         :return: io.StringIO for pdb of ligand retrieved from LigandExpo
         """
-        time.sleep(0.1)
+        time.sleep(1)
         ideal_pdb_text = requests.get(
             'http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand),
             stream=False).text
@@ -64,7 +64,7 @@ class Alignments():
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: List of all ligand HETATM records
         """
-        time.sleep(0.1)
+        time.sleep(1)
         lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand), stream=False)
         soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
 
@@ -97,7 +97,7 @@ class Alignments():
                 print("\n Checking: {}".format(lig_request_suffix))
 
                 # Get ligand record from LigExpo
-                time.sleep(0.1)
+                time.sleep(1)
                 full_lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
                                                 stream=False).text
                 chain = lig_request_suffix.split('_')[3]
@@ -194,24 +194,26 @@ class Alignments():
         
         :return: dict mapping fragment atoms to target atoms
         """
+        # todo: ADD ALL THE HYDROGENS
         # Import fragment and target ligand
-        fragment_mol_H = Chem.MolFromPDBFile(fragment_pdb)
+        fragment_mol = Chem.MolFromPDBFile(fragment_pdb, removeHs=False)
         target_mol_H = Chem.MolFromPDBBlock(target_string)
 
-        # todo: figure out a more elegant solution for hydrogens... or just remove them all
-        # Remove Hydrogens from fragment and target PDBs
-        # I have found that hydrogens cause problems down the line with matching atom indicies to actual atoms
-        # It seems that the mapping is correct even with hydrogens included, it's grabbing the correct atoms with prody
-        # that's currently the issue. Either way, keeping this for now until this issue is resolved.
+        # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
+        # 3dyb_AD0_1_A_500__B___.ipdb
+        # Oh hey this ligand was an issue anyways. Yay. I guess.
+        # Anywhere, here's another if statement
+        if target_mol_H == None:
+            return None, None
 
-        fragment_mol = Chem.RemoveHs(fragment_mol_H)
-        target_mol = Chem.RemoveHs(target_mol_H)
+        target_mol = Chem.AddHs(target_mol_H)
+        target_mol_PDB_Block = Chem.MolToPDBBlock(target_mol)
 
         # Debugging
         # For some reason 3dyb_AD0_1_A_500__B___.ipdb cannot be imported with RDKit...
         # Skipping for now...
         if target_mol == None or fragment_mol == None:
-            return None
+            return None, None
 
         # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
         substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol])
@@ -234,7 +236,7 @@ class Alignments():
         else:
             fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
-        return fragment_target_mapping
+        return fragment_target_mapping, target_mol_PDB_Block
 
 
     def identify_best_substructure(self, frag_matches, target_matches, fragment_pdb, target_string):
@@ -274,31 +276,19 @@ class Alignments():
         target_prody = target_prody_H.select('not hydrogen')
         fragment_prody = fragment_prody_H.select('not hydrogen')
 
-        # Map prody indicies to actual indicies...
-        # Prody indicies after select('not hydrogen') leaves gaps in index list where hydrogens used to be...
-        # RDKit appears to already removed hydrogens before mapping, I've explicitly set it to do that now
-        # I need to remove hydrogens from the prody atomgroups for proper atom-atom mapping to align fragments
+        # Retrieve fragment and target atom indicies to align
+        fragment_atom_indices = [a[0] for a in fragment_target_mapping]
+        target_atom_indices = [a[1] for a in fragment_target_mapping]
 
-        frag_index_map = {int(a): int(b) for a, b in zip(np.arange(len(fragment_prody)), fragment_prody.getIndices())}
-        trgt_index_map = {int(a): int(b) for a, b in zip(np.arange(len(target_prody)), target_prody.getIndices())}
+        # Convert atom indicies into atom objects
+        frag_atom_selections = [fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
+        trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in target_atom_indices]
 
-        # For Reference:
-        # fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches)]
+        # Get atom coordinates out of atom objects
+        # None is because hydrogens were removed
+        frag_atom_coords = np.asarray([atom.getCoords()[0] for atom in frag_atom_selections if atom != None])
+        trgt_atom_coords = np.asarray([atom.getCoords()[0] for atom in trgt_atom_selections if atom != None])
 
-        frag_inx_string = [str(frag_index_map[a[0]]) for a in fragment_target_mapping]
-        trgt_inx_string = [str(trgt_index_map[b[1]]) for b in fragment_target_mapping]
-
-        # So after inspecting the aligned structures, I've found that the wrong atoms are being aligned...
-        # The atoms are currently ordered from highest to lowest according to index... need to change that so that the
-        # orders instead agree with the atom mappings
-        # I'll need to assemble the matrices by hand it seems.
-
-        frag_atom_selections = [fragment_prody.select('index {}'.format(index)) for index in frag_inx_string]
-        trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in trgt_inx_string]
-
-        # Get atom coordinates
-        frag_atom_coords = np.asarray([atom.getCoords()[0] for atom in frag_atom_selections])
-        trgt_atom_coords = np.asarray([atom.getCoords()[0] for atom in trgt_atom_selections])
 
         return frag_atom_coords, trgt_atom_coords
 
