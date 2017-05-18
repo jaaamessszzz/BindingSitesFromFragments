@@ -17,10 +17,11 @@ class Alignments():
     """
     This class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
     fragments.
-    
+
     Chris suggests looking into a package called RDKit for manipulating SMILES strings and structures
-    
+
     """
+
     def __init__(self, user_defined_dir, fragment, ligand, processed_PDBs_path):
         self.user_defined_dir = user_defined_dir
         self.fragment = fragment
@@ -30,7 +31,6 @@ class Alignments():
         self.processed_PDBs_path = processed_PDBs_path
 
         # http://ligand-expo.rcsb.org/reports/4/4MZ/4MZ_ideal.pdb
-
 
     def fetch_ideal_pdb(self, ligand):
         """
@@ -46,36 +46,34 @@ class Alignments():
             stream=False).text
         return prody.parsePDBStream(io.StringIO(ideal_pdb_text))
 
-
     def fetch_ligand_records(self, ligand):
         """
         Retrieves ligand records from LigandExpo
-        
+
         20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
         structure in the PDB using LigandExpo as outlined here:
         http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
-        
+
         This might be the way to go since it removes the need for all this parsing...
-        
+
         20170516: So I've found that free amino acids such as HIS are not retrievable using LigandExpo in this manner...
         I'm going to need to find a solution for this. 
-        
+
         :param ligand: Three letter code for fragment-containing ligand
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: List of all ligand HETATM records
         """
         time.sleep(1)
-        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand), stream=False)
+        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
+                                   stream=False)
         soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
 
-
         return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
-
 
     def fetch_specific_ligand_record(self, pdb_file):
         """
         Fetch a specific ligand record from ligand expo
-        
+
         :param pdb_file: path to the specific pdb file containing the desired ligand
         :return: 
         """
@@ -98,8 +96,10 @@ class Alignments():
 
                 # Get ligand record from LigExpo
                 time.sleep(1)
-                full_lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
-                                                stream=False).text
+                full_lig_request = requests.get(
+                    'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand,
+                                                                             lig_request_suffix),
+                    stream=False).text
                 chain = lig_request_suffix.split('_')[3]
 
                 # Determine whether there are multiple occupancies for the target ligand
@@ -138,7 +138,6 @@ class Alignments():
         print('\n{} REJECTED! SAD!\n'.format(pdbid))
         return True, None, None
 
-
     def clean_ligand_HETATM_records(self, target_string):
         """
         Removes alternate location indicators...
@@ -168,7 +167,7 @@ class Alignments():
                 Temperature = line[61:66].strip()
                 Element_Symbol = line[77].strip()
 
-                cleaned_line = '{0:<6} {1:4} {2:>4} {3:3} {4}{5:>4}    {6:>8}{7:>8}{8:>8}{9:>6}{10:>6}         {11}\n'\
+                cleaned_line = '{0:<6} {1:4} {2:>4} {3:3} {4}{5:>4}    {6:>8}{7:>8}{8:>8}{9:>6}{10:>6}         {11}\n' \
                     .format(HETATM, Serial, Atom_Name, Residue_Name, Chain_ID, ResSeq_ID, x, y, z, Occupancy,
                             Temperature, Element_Symbol)
                 cleaned_target += cleaned_line
@@ -179,19 +178,18 @@ class Alignments():
 
         return cleaned_target, multiple_occupancies
 
-
     def fragment_target_mapping(self, fragment_pdb, target_string):
         """
         I'm going to utilize NetworkX (shoutout to Kale) for mapping fragment atoms to the corresponding atoms in each
         of the fragment-containing small molecules. [http://networkx.readthedocs.io]
-        
+
         To do this, I will need atom and connectivity information for each small molecule to generate the nodes and 
         edges in the graphs. 
-        
+
         OR. Or. I talked to Chris today and he showed me this chemoinformatics package called RDKit. This may be a much
         more streamlined method of doing this without needing to resort to subgraphs...
         > https://sourceforge.net/p/rdkit/mailman/message/34549645/
-        
+
         :return: dict mapping fragment atoms to target atoms
         """
         # todo: ADD ALL THE HYDROGENS
@@ -238,7 +236,6 @@ class Alignments():
 
         return fragment_target_mapping, target_mol_PDB_Block
 
-
     def identify_best_substructure(self, frag_matches, target_matches, fragment_pdb, target_string):
         """
         Identifies the "correct" substructure from a RDKit GetSubstructMatches search.
@@ -248,7 +245,7 @@ class Alignments():
 
         This method will not help discriminate decoys for molecules with several repeating substructures... 
         like sugars... like in ONPF...
-        
+
         :param frag_matches: tuple with atom indicies for the fragment substructure match
         :param target_matches: iterable of tuples containing atom indicies for each substructure hit
         :param fragment_pdb: path to fragment pdb
@@ -258,14 +255,14 @@ class Alignments():
         rmsd_dict = {}
         for match in target_matches:
             fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, match)]
-            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping, fragment_pdb, target_string)
+            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(
+                fragment_target_mapping, fragment_pdb, target_string)
             transformation_matrix = prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
             aligned_trgt = prody.applyTransformation(transformation_matrix, trgt_atom_coords)
 
             rmsd_dict[prody.calcRMSD(frag_atom_coords, aligned_trgt)] = fragment_target_mapping
 
         return rmsd_dict[min(rmsd_dict.keys())]
-
 
     def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping, fragment_pdb, target_string):
         # Fragment and target as prody atom objects (including Hydrogens)
@@ -289,29 +286,29 @@ class Alignments():
         frag_atom_coords = np.asarray([atom.getCoords()[0] for atom in frag_atom_selections if atom != None])
         trgt_atom_coords = np.asarray([atom.getCoords()[0] for atom in trgt_atom_selections if atom != None])
 
-
         return frag_atom_coords, trgt_atom_coords
 
     def determine_rotation_and_translation(self, fragment_target_mapping, fragment_pdb, target_string):
         """
         Implementing the Kabsch algorithm for aligning all fragment-containing small molecules to the target ligand
         on the mapped atoms as determined by fragment_target_mapping()
-        
+
         :return: Prody transformation object with rotation and translation matrix/vector
         """
-        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping, fragment_pdb, target_string)
+        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping,
+                                                                                             fragment_pdb,
+                                                                                             target_string)
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
-
 
     def apply_transformation(self, transformation_matrix, target_pdb_path, ligand, ligand_chain):
         """
         Apply transformation to the target ligand-protein complex.
-        
+
         Also considering:
         * Only work with residues with CA within 8A of ligand
         * Write all transformed PDBs to a new working directory?
-        
+
         :param transformation_matrix: 
         :param target_pdb: 
         :return: 
@@ -326,7 +323,6 @@ class Alignments():
         prody.writePDB(os.path.join(self.processed_PDBs_path, '{}_processed.pdb'.format(PDBID)), transformed_pdb)
 
         return transformed_pdb
-
 
     ####################################################################################################################
     #

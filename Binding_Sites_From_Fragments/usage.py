@@ -52,7 +52,6 @@ import sys
 import pprint
 from .fragments import Fragments
 from .alignments import Alignments
-from .checks import *
 
 def main():
 
@@ -133,18 +132,17 @@ def main():
                                 pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
                                 fragment_target_mapping, target_mol_PDB_Block = align.fragment_target_mapping(pdb_path, ligand_records)
 
-                                # Debugging
-                                # For some reason 3dyb_AD0_1_A_500__B___.ipdb cannot be imported with RDKit...
-                                # Skipping for now...
-                                if fragment_target_mapping == None:
-                                    continue
-
                                 # Determine translation vector and rotation matrix
+<<<<<<< HEAD
                                 transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, target_mol_PDB_Block)
                                 # print(transformation_matrix.getMatrix())
+=======
+                                transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, ligand_records)
+                                print(transformation_matrix.getMatrix())
+>>>>>>> a2142eb5441dfd7b5d92f650c296a556012ada27
 
                                 # Apply transformation to protein_ligand complex
-                                transformed_pdb = align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
+                                align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
 
                         else:
                             print('{} exists!'.format(pdb))
