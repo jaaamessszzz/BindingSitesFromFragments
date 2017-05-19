@@ -19,18 +19,23 @@ class Alignments():
     fragments.
 
     Chris suggests looking into a package called RDKit for manipulating SMILES strings and structures
-
     """
 
     def __init__(self, user_defined_dir, fragment, ligand, processed_PDBs_path):
         self.user_defined_dir = user_defined_dir
         self.fragment = fragment
         self.ligand = ligand.upper()
-        self.ligexpo_list = self.fetch_ligand_records(self.ligand)
-        self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
         self.processed_PDBs_path = processed_PDBs_path
 
         # http://ligand-expo.rcsb.org/reports/4/4MZ/4MZ_ideal.pdb
+
+    def fetch_records(self):
+        """
+        Only download ligands from Ligand Expo if required...
+        :return: 
+        """
+        self.ligexpo_list = self.fetch_ligand_records(self.ligand)
+        self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
 
     def fetch_ideal_pdb(self, ligand):
         """
@@ -40,7 +45,7 @@ class Alignments():
         :param ligand: Three letter code for the desired ligand (upper case!!)
         :return: io.StringIO for pdb of ligand retrieved from LigandExpo
         """
-        time.sleep(1)
+        time.sleep(0.1)
         ideal_pdb_text = requests.get(
             'http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand),
             stream=False).text
@@ -63,7 +68,7 @@ class Alignments():
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: List of all ligand HETATM records
         """
-        time.sleep(1)
+        time.sleep(0.1)
         lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
                                    stream=False)
         soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
@@ -95,17 +100,18 @@ class Alignments():
                 print("\n Checking: {}".format(lig_request_suffix))
 
                 # Get ligand record from LigExpo
-                time.sleep(1)
+                time.sleep(0.1)
                 full_lig_request = requests.get(
                     'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand,
                                                                              lig_request_suffix),
                     stream=False).text
                 chain = lig_request_suffix.split('_')[3]
+                ResSeq_ID = lig_request_suffix.split('_')[4]
 
                 # Determine whether there are multiple occupancies for the target ligand
                 # I am going to avoid using ligands with multiple occupancies as this suggests binding conformations
                 # with low affinity and specificity
-                cleaned_target, multiple_occupancies = self.clean_ligand_HETATM_records(full_lig_request)
+                multiple_occupancies = self.clean_ligand_HETATM_records(full_lig_request)
 
                 print('Multiple Occupancies: {}'.format(multiple_occupancies))
                 if not multiple_occupancies:
@@ -128,7 +134,7 @@ class Alignments():
                             prody.parsePDBStream(io.StringIO(full_lig_request))
                             # Test the source protein-ligand complex PDB at the same time...
                             prody.parsePDB(pdb_file)
-                            return reject, full_lig_request, chain
+                            return reject, full_lig_request, ResSeq_ID, chain
 
                         except Exception as e:
                             print(e)
@@ -136,47 +142,24 @@ class Alignments():
 
         # If I can't find any ligands fully represented, reject this PDB
         print('\n{} REJECTED! SAD!\n'.format(pdbid))
-        return True, None, None
+        return True, None, None, None
 
     def clean_ligand_HETATM_records(self, target_string):
         """
         Removes alternate location indicators...
-        :param target_string: 
+        UPDATE: now this function just checks to make sure there aren't multiple occupancies for any atoms in the ligand
+        
+        :param target_string: string of ligand pdb contents
         :return: 
         """
-        cleaned_target = ''
         multiple_occupancies = False
         target_string_split = target_string.split('\n')
         for line in target_string_split:
-            if line[:6] == 'HETATM':
+            if line[:6] == 'HETATM' and line[16:17] != ' ':
+                multiple_occupancies = True
+                break
 
-                if line[16:17] != ' ':
-                    multiple_occupancies = True
-                    break
-
-                HETATM = line[:6]
-                Serial = line[7:11].strip()
-                Atom_Name = line[13:16].strip()
-                Residue_Name = line[17:20].strip()
-                Chain_ID = line[21:22].strip()
-                ResSeq_ID = line[23:26].strip()
-                x = line[31:38].strip()
-                y = line[39:46].strip()
-                z = line[47:54].strip()
-                Occupancy = line[55:60].strip()
-                Temperature = line[61:66].strip()
-                Element_Symbol = line[77].strip()
-
-                cleaned_line = '{0:<6} {1:4} {2:>4} {3:3} {4}{5:>4}    {6:>8}{7:>8}{8:>8}{9:>6}{10:>6}         {11}\n' \
-                    .format(HETATM, Serial, Atom_Name, Residue_Name, Chain_ID, ResSeq_ID, x, y, z, Occupancy,
-                            Temperature, Element_Symbol)
-                cleaned_target += cleaned_line
-
-            else:
-                cleaned_target += line
-                cleaned_target += '\n'
-
-        return cleaned_target, multiple_occupancies
+        return multiple_occupancies
 
     def fragment_target_mapping(self, fragment_pdb, target_string):
         """
@@ -200,7 +183,7 @@ class Alignments():
         # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
         # 3dyb_AD0_1_A_500__B___.ipdb
         # Oh hey this ligand was an issue anyways. Yay. I guess.
-        # Anywhere, here's another if statement
+        # Anyways, here's another if statement
         if target_mol_H == None:
             return None, None
 
@@ -212,6 +195,10 @@ class Alignments():
         # Skipping for now...
         if target_mol == None or fragment_mol == None:
             return None, None
+
+        # Debugging
+        print(target_mol)
+        print(target_mol_H)
 
         # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
         substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol])
@@ -301,7 +288,7 @@ class Alignments():
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
-    def apply_transformation(self, transformation_matrix, target_pdb_path, ligand, ligand_chain):
+    def apply_transformation(self, transformation_matrix, target_pdb_path, ligand, ligand_chain, ligand_resnum):
         """
         Apply transformation to the target ligand-protein complex.
 
@@ -315,7 +302,8 @@ class Alignments():
         """
         # Only work with residues within 8A of target ligand
         target_pdb = prody.parsePDB(target_pdb_path)
-        target_shell = target_pdb.select('within 8 of (resname {} and chain {})'.format(ligand, ligand_chain))
+        target_shell = target_pdb.select('protein and within 8 of (resname {0} and chain {1} and resnum {2})\
+         or (resname {0} and chain {1} and resnum {2})'.format(ligand, ligand_chain, ligand_resnum))
 
         PDBID = os.path.basename(os.path.normpath(target_pdb_path)).split('.')[0]
 

@@ -23,6 +23,7 @@ Usage:
     bsff generate_fragments <ligand> [options]
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
+    bsff cluster <user_defined_dir>
 
 Arguments:
     generate_fragments
@@ -33,6 +34,9 @@ Arguments:
         
     align
         Align fragments in fragment-containing small molecules
+    
+    cluster
+        Identify representitive residue contacts with each aligned fragment ensemble
         
     <ligand>
         By default, this is the name of the target ligand. This can be changed
@@ -52,6 +56,8 @@ import sys
 import pprint
 from .fragments import Fragments
 from .alignments import Alignments
+from .clustering import Cluster
+from .utils import *
 
 def main():
 
@@ -115,10 +121,13 @@ def main():
                         processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
 
                         if not processed_check(processed_dir, pdbid, rejected_list):
+                            # Set things up! Get ligands from Ligand Expo
+                            # This is to avoid downloading ligands when all PDBs have already been processed
+                            align.fetch_records()
 
                             # Extract HETATM and CONECT records for the target ligand
                             # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-                            reject, ligand_records, ligand_chain = align.fetch_specific_ligand_record(pdb)
+                            reject, ligand_records, ligand_resnum, ligand_chain = align.fetch_specific_ligand_record(pdb)
 
                             # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
                             if reject:
@@ -132,35 +141,21 @@ def main():
                                 pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
                                 fragment_target_mapping, target_mol_PDB_Block = align.fragment_target_mapping(pdb_path, ligand_records)
 
+                                if fragment_target_mapping == None or target_mol_PDB_Block == None:
+                                    with open(rejected_list_path, 'a+') as reject_list:
+                                        reject_list.write('{}\n'.format(pdbid))
+                                    continue
+
                                 # Determine translation vector and rotation matrix
                                 transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, target_mol_PDB_Block)
                                 # print(transformation_matrix.getMatrix())
 
-
                                 # Apply transformation to protein_ligand complex
-                                align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain)
+                                align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain, ligand_resnum)
 
                         else:
                             print('{} exists!'.format(pdb))
-            # sys.exit()
+    if args['cluster']:
+        cluster = Cluster(args['<user_defined_dir>'])
+        cluster.cluster()
 
-def directory_check(dir):
-    for subdir in os.listdir(dir):
-        path = os.path.join(dir, subdir)
-        if os.path.isdir(path):
-            yield path
-
-
-def pdb_check(dir):
-    for file in os.listdir(dir):
-        path = os.path.join(dir, file)
-        if path.endswith('.pdb'):
-            yield path
-
-def processed_check(processed_dir, pdb, rejected_list):
-    pdbid = pdb.split('.')[0].upper()
-
-    in_reject_list = any([pdb == reject for reject in rejected_list])
-    already_processed = os.path.exists(os.path.join(processed_dir, '{}_processed.pdb'.format(pdbid)))
-
-    return any([in_reject_list, already_processed])
