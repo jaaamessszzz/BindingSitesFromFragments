@@ -138,7 +138,7 @@ def main():
                             # Continue if PDB has not been processed, rejected, or excluded by the user
                             else:
                                 # Mapping of fragment atoms to target ligand atoms
-                                align.pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                                align.fragment_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
                                 mapping_successful = align.fragment_target_mapping()
 
                                 if not mapping_successful:

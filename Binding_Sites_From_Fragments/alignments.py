@@ -43,7 +43,6 @@ class Alignments():
         :param ligand: Three letter code for the desired ligand (upper case!!)
         :return: io.StringIO for pdb of ligand retrieved from LigandExpo
         """
-        time.sleep(0.1)
         ideal_pdb_text = requests.get(
             'http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand),
             stream=False).text
@@ -66,7 +65,6 @@ class Alignments():
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: List of all ligand HETATM records
         """
-        time.sleep(0.1)
         lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
                                    stream=False)
         soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
@@ -77,12 +75,18 @@ class Alignments():
 class Align_PDB(Alignments):
     """
     Subclass with functions for aligning individual PDBs
+    :param pdb_file: path to input PDB containing protein bound to fragment-containing target molecule
+    :param target_string: string of PDB for target ligand, fetched from LigandExpo
+    :param fragment_path: path to PDB of current fragment
+    :param lig_request_suffix: file name of target ligand PDB fetched from LigandExpo
+    :param ligand_chain: Chain ID of target ligand used for alignment
+    :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
     """
     def __init__(self, Alignments):
         self.__dict__ = Alignments.__dict__
-        self.pdb_file = None
+        self.pdb_file = None 
         self.target_string = None
-        self.pdb_path = None
+        self.fragment_path = None
         self.lig_request_suffix = None
         self.ligand_chain = None
         self.ligand_ResSeq_ID = None
@@ -111,7 +115,6 @@ class Align_PDB(Alignments):
                 print("\n Checking: {}".format(lig_request_suffix))
 
                 # Get ligand record from LigExpo
-                time.sleep(0.1)
                 full_lig_request = requests.get(
                     'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
                     stream=False).text
@@ -191,7 +194,7 @@ class Align_PDB(Alignments):
         """
         # todo: ADD ALL THE HYDROGENS
         # Import fragment and target ligand
-        fragment_mol = Chem.MolFromPDBFile(self.pdb_path, removeHs=False)
+        fragment_mol = Chem.MolFromPDBFile(self.fragment_path, removeHs=False)
         target_mol_H = Chem.MolFromPDBBlock(self.target_string)
 
         # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
@@ -266,7 +269,7 @@ class Align_PDB(Alignments):
     def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping):
         # Fragment and target as prody atom objects (including Hydrogens)
         target_prody_H = prody.parsePDBStream(io.StringIO(self.target_string))
-        fragment_prody_H = prody.parsePDB(self.pdb_path)
+        fragment_prody_H = prody.parsePDB(self.fragment_path)
 
         # Fragment and target prody selections (excluding hydrogens)
         target_prody = target_prody_H.select('not hydrogen')
@@ -312,6 +315,8 @@ class Align_PDB(Alignments):
         """
         # Only work with residues within 8A of target ligand
         target_pdb = prody.parsePDB(self.pdb_file)
+
+        # todo: somehow convert target fragment indicies to atom names that I can use for selection
         target_shell = target_pdb.select('protein and within 8 of (resname {0} and chain {1} and resnum {2})\
          or (resname {0} and chain {1} and resnum {2})'.format(self.ligand, self.ligand_chain, self.ligand_ResSeq_ID))
 
