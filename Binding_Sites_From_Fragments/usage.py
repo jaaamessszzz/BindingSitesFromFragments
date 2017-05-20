@@ -127,7 +127,7 @@ def main():
 
                             # Extract HETATM and CONECT records for the target ligand
                             # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-                            reject, ligand_records, ligand_resnum, ligand_chain = align.fetch_specific_ligand_record(pdb)
+                            reject, lig_request_suffix, ligand_records, ligand_chain, ligand_resnum = align.fetch_specific_ligand_record(pdb)
 
                             # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
                             if reject:
@@ -151,7 +151,7 @@ def main():
                                 # print(transformation_matrix.getMatrix())
 
                                 # Apply transformation to protein_ligand complex
-                                align.apply_transformation(transformation_matrix, pdb, ligand, ligand_chain, ligand_resnum)
+                                align.apply_transformation(transformation_matrix, pdb, lig_request_suffix, ligand, ligand_chain, ligand_resnum)
 
                         else:
                             print('{} exists!'.format(pdb))

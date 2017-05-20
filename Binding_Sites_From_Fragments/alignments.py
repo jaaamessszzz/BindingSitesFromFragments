@@ -134,7 +134,7 @@ class Alignments():
                             prody.parsePDBStream(io.StringIO(full_lig_request))
                             # Test the source protein-ligand complex PDB at the same time...
                             prody.parsePDB(pdb_file)
-                            return reject, full_lig_request, ResSeq_ID, chain
+                            return reject, lig_request_suffix, full_lig_request, chain, ResSeq_ID
 
                         except Exception as e:
                             print(e)
@@ -142,7 +142,7 @@ class Alignments():
 
         # If I can't find any ligands fully represented, reject this PDB
         print('\n{} REJECTED! SAD!\n'.format(pdbid))
-        return True, None, None, None
+        return True, None, None, None, None
 
     def clean_ligand_HETATM_records(self, target_string):
         """
@@ -288,7 +288,7 @@ class Alignments():
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
-    def apply_transformation(self, transformation_matrix, target_pdb_path, ligand, ligand_chain, ligand_resnum):
+    def apply_transformation(self, transformation_matrix, target_pdb_path, lig_request_suffix, ligand, ligand_chain, ligand_resnum):
         """
         Apply transformation to the target ligand-protein complex.
 
@@ -305,10 +305,10 @@ class Alignments():
         target_shell = target_pdb.select('protein and within 8 of (resname {0} and chain {1} and resnum {2})\
          or (resname {0} and chain {1} and resnum {2})'.format(ligand, ligand_chain, ligand_resnum))
 
-        PDBID = os.path.basename(os.path.normpath(target_pdb_path)).split('.')[0]
+        PDBID = lig_request_suffix.split('.')[0].upper()
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
-        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}_processed.pdb'.format(PDBID)), transformed_pdb)
+        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}processed.pdb'.format(PDBID)), transformed_pdb)
 
         return transformed_pdb
 
