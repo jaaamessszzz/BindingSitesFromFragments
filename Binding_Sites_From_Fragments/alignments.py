@@ -15,10 +15,8 @@ import pprint
 
 class Alignments():
     """
-    This class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
+    This base class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
     fragments.
-
-    Chris suggests looking into a package called RDKit for manipulating SMILES strings and structures
     """
 
     def __init__(self, user_defined_dir, fragment, ligand, processed_PDBs_path):
@@ -26,13 +24,13 @@ class Alignments():
         self.fragment = fragment
         self.ligand = ligand.upper()
         self.processed_PDBs_path = processed_PDBs_path
-
-        # http://ligand-expo.rcsb.org/reports/4/4MZ/4MZ_ideal.pdb
+        # Initialized later
+        self.ligexpo_list = None
+        self.ideal_ligand_pdb = None
 
     def fetch_records(self):
         """
-        Only download ligands from Ligand Expo if required...
-        :return: 
+        Only download ligands from Ligand Expo if and when required...
         """
         self.ligexpo_list = self.fetch_ligand_records(self.ligand)
         self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
@@ -75,6 +73,20 @@ class Alignments():
 
         return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
 
+
+class Align_PDB(Alignments):
+    """
+    Subclass with functions for aligning individual PDBs
+    """
+    def __init__(self, Alignments):
+        self.__dict__ = Alignments.__dict__
+        self.pdb_file = None
+        self.target_string = None
+        self.pdb_path = None
+        self.lig_request_suffix = None
+        self.ligand_chain = None
+        self.ligand_ResSeq_ID = None
+
     def fetch_specific_ligand_record(self, pdb_file):
         """
         Fetch a specific ligand record from ligand expo
@@ -90,23 +102,19 @@ class Alignments():
 
         # Go through all ligands bound to PDBs
         pdbid = os.path.basename(os.path.normpath(pdb_file)).split('.')[0]
-        for item in self.ligexpo_list:
+        for lig_request_suffix in self.ligexpo_list:
 
             # For my specific ligand of interest bound to the correct PDB...
-            if pdbid.lower() in item:
+            if pdbid.lower() in lig_request_suffix:
 
                 # Report
-                lig_request_suffix = item
                 print("\n Checking: {}".format(lig_request_suffix))
 
                 # Get ligand record from LigExpo
                 time.sleep(0.1)
                 full_lig_request = requests.get(
-                    'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand,
-                                                                             lig_request_suffix),
+                    'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
                     stream=False).text
-                chain = lig_request_suffix.split('_')[3]
-                ResSeq_ID = lig_request_suffix.split('_')[4]
 
                 # Determine whether there are multiple occupancies for the target ligand
                 # I am going to avoid using ligands with multiple occupancies as this suggests binding conformations
@@ -127,14 +135,20 @@ class Alignments():
                     # Compare ideal to ligand pulled from Ligand Expo
                     # If the number of atoms are the same, good enough for me (at the moment)
                     if atom_count == self.ideal_ligand_pdb.select('not hydrogen').numAtoms():
-
                         # todo: find a more elegant way of testing if prody can open these
                         # Verify whether I can actually open the ligand pdb with Prody...
                         try:
                             prody.parsePDBStream(io.StringIO(full_lig_request))
                             # Test the source protein-ligand complex PDB at the same time...
                             prody.parsePDB(pdb_file)
-                            return reject, lig_request_suffix, full_lig_request, chain, ResSeq_ID
+                            # If everything is all good, assign variables
+                            self.pdb_file = pdb_file
+                            self.target_string = full_lig_request
+                            self.lig_request_suffix = lig_request_suffix.split('.')[0].upper()
+                            self.ligand_chain = lig_request_suffix.split('_')[3]
+                            self.ligand_ResSeq_ID = lig_request_suffix.split('_')[4]
+
+                            return reject
 
                         except Exception as e:
                             print(e)
@@ -142,18 +156,18 @@ class Alignments():
 
         # If I can't find any ligands fully represented, reject this PDB
         print('\n{} REJECTED! SAD!\n'.format(pdbid))
-        return True, None, None, None, None
+        return True
 
-    def clean_ligand_HETATM_records(self, target_string):
+    def clean_ligand_HETATM_records(self, full_lig_request):
         """
         Removes alternate location indicators...
         UPDATE: now this function just checks to make sure there aren't multiple occupancies for any atoms in the ligand
-        
+
         :param target_string: string of ligand pdb contents
         :return: 
         """
         multiple_occupancies = False
-        target_string_split = target_string.split('\n')
+        target_string_split = full_lig_request.split('\n')
         for line in target_string_split:
             if line[:6] == 'HETATM' and line[16:17] != ' ':
                 multiple_occupancies = True
@@ -161,7 +175,7 @@ class Alignments():
 
         return multiple_occupancies
 
-    def fragment_target_mapping(self, fragment_pdb, target_string):
+    def fragment_target_mapping(self):
         """
         I'm going to utilize NetworkX (shoutout to Kale) for mapping fragment atoms to the corresponding atoms in each
         of the fragment-containing small molecules. [http://networkx.readthedocs.io]
@@ -177,15 +191,15 @@ class Alignments():
         """
         # todo: ADD ALL THE HYDROGENS
         # Import fragment and target ligand
-        fragment_mol = Chem.MolFromPDBFile(fragment_pdb, removeHs=False)
-        target_mol_H = Chem.MolFromPDBBlock(target_string)
+        fragment_mol = Chem.MolFromPDBFile(self.pdb_path, removeHs=False)
+        target_mol_H = Chem.MolFromPDBBlock(self.target_string)
 
         # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
         # 3dyb_AD0_1_A_500__B___.ipdb
         # Oh hey this ligand was an issue anyways. Yay. I guess.
         # Anyways, here's another if statement
         if target_mol_H == None:
-            return None, None
+            return False
 
         target_mol = Chem.AddHs(target_mol_H)
         target_mol_PDB_Block = Chem.MolToPDBBlock(target_mol)
@@ -194,11 +208,7 @@ class Alignments():
         # For some reason 3dyb_AD0_1_A_500__B___.ipdb cannot be imported with RDKit...
         # Skipping for now...
         if target_mol == None or fragment_mol == None:
-            return None, None
-
-        # Debugging
-        print(target_mol)
-        print(target_mol_H)
+            return False
 
         # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
         substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol])
@@ -209,21 +219,24 @@ class Alignments():
         target_matches = target_mol.GetSubstructMatches(sub_mol)
 
         print("\nTarget Matches\n")
-        print(target_matches)
+        pprint.pprint(target_matches)
 
         # Maps fragment atom index to target atom index
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
         if len(target_matches) > 1:
-            fragment_target_mapping = self.identify_best_substructure(frag_matches, target_matches,
-                                                                      fragment_pdb, target_string)
+            fragment_target_mapping = self.identify_best_substructure(frag_matches, target_matches)
             # fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
         else:
             fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
-        return fragment_target_mapping, target_mol_PDB_Block
+        # Assign successful mappings to self
+        self.fragment_target_map = fragment_target_mapping
+        self.target_mol_PDB_Block = target_mol_PDB_Block
 
-    def identify_best_substructure(self, frag_matches, target_matches, fragment_pdb, target_string):
+        return True
+
+    def identify_best_substructure(self, frag_matches, target_matches):
         """
         Identifies the "correct" substructure from a RDKit GetSubstructMatches search.
 
@@ -242,8 +255,7 @@ class Alignments():
         rmsd_dict = {}
         for match in target_matches:
             fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, match)]
-            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(
-                fragment_target_mapping, fragment_pdb, target_string)
+            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping)
             transformation_matrix = prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
             aligned_trgt = prody.applyTransformation(transformation_matrix, trgt_atom_coords)
 
@@ -251,10 +263,10 @@ class Alignments():
 
         return rmsd_dict[min(rmsd_dict.keys())]
 
-    def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping, fragment_pdb, target_string):
+    def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping):
         # Fragment and target as prody atom objects (including Hydrogens)
-        target_prody_H = prody.parsePDBStream(io.StringIO(target_string))
-        fragment_prody_H = prody.parsePDB(fragment_pdb)
+        target_prody_H = prody.parsePDBStream(io.StringIO(self.target_string))
+        fragment_prody_H = prody.parsePDB(self.pdb_path)
 
         # Fragment and target prody selections (excluding hydrogens)
         target_prody = target_prody_H.select('not hydrogen')
@@ -275,20 +287,18 @@ class Alignments():
 
         return frag_atom_coords, trgt_atom_coords
 
-    def determine_rotation_and_translation(self, fragment_target_mapping, fragment_pdb, target_string):
+    def determine_rotation_and_translation(self):
         """
         Implementing the Kabsch algorithm for aligning all fragment-containing small molecules to the target ligand
         on the mapped atoms as determined by fragment_target_mapping()
 
         :return: Prody transformation object with rotation and translation matrix/vector
         """
-        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping,
-                                                                                             fragment_pdb,
-                                                                                             target_string)
+        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
-    def apply_transformation(self, transformation_matrix, target_pdb_path, lig_request_suffix, ligand, ligand_chain, ligand_resnum):
+    def apply_transformation(self, transformation_matrix):
         """
         Apply transformation to the target ligand-protein complex.
 
@@ -301,108 +311,11 @@ class Alignments():
         :return: 
         """
         # Only work with residues within 8A of target ligand
-        target_pdb = prody.parsePDB(target_pdb_path)
+        target_pdb = prody.parsePDB(self.pdb_file)
         target_shell = target_pdb.select('protein and within 8 of (resname {0} and chain {1} and resnum {2})\
-         or (resname {0} and chain {1} and resnum {2})'.format(ligand, ligand_chain, ligand_resnum))
-
-        PDBID = lig_request_suffix.split('.')[0].upper()
+         or (resname {0} and chain {1} and resnum {2})'.format(self.ligand, self.ligand_chain, self.ligand_ResSeq_ID))
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
-        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}processed.pdb'.format(PDBID)), transformed_pdb)
+        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}processed.pdb'.format(self.lig_request_suffix)), transformed_pdb)
 
         return transformed_pdb
-
-    ####################################################################################################################
-    #
-    #  Everything below this block is depreciated or has been replaced!
-    #
-    ####################################################################################################################
-
-
-    def extract_atoms_and_connectivities(self, ligand, pdb_file):
-        """
-        Extract information on atoms and connectivities for a fragment-containing small molecule.
-
-        Biopython is a pain in the ass
-        BioPandas doesn't handle CONECT records
-        Prody doesn't handle CONECT records
-
-        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
-        structure in the PDB using LigandExpo as outlined here:
-        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
-
-        This might be the way to go since it removes the need for all this parsing...
-
-        :param ligand: Three letter code for fragment-containing ligand
-        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
-        :return: String of HETAM and CONECT records from the input pdb for the given ligand
-        """
-
-        # Debugging
-        print(pdb_file)
-
-        # todo: remove redundant parsePDB()... don't need to be parsing the same PDB multiple times
-        # Determine which chains have my target ligand
-        ag = prody.parsePDB(pdb_file)
-        ag_ligands = ag.select('resname {}'.format(ligand))
-
-        # Pick a chain and extract the target ligand... arbitrarily picks the first chain for now
-        chain = ag_ligands.getChids()[0]
-
-        # Debugging
-        print(ag_ligands)
-        print(chain)
-        for atom in ag_ligands:
-            print(atom.getChid())
-        print(ligand)
-        print(type(ligand))
-
-        # I only need CONECT and HETATM records for my ligand
-        # This function assumes that all CONECT records will be at the very end of the PDB file
-        pdb = open(pdb_file)
-        line_list = []
-
-        # Store HETAM lines for the ligand
-        HETAM_num_list = []
-
-        for line in pdb:
-            split_line = line.split()
-
-            if split_line[0] == 'HETATM' and split_line[3] == ligand and split_line[4][0] == chain:
-                line_list.append(line)
-
-                # Keep track of HETAM numbers so I know which CONET lines to pull
-                HETAM_num_list.append(line.split()[1])
-
-            # Save CONECT records if they reference one of the HETAMs in my ligand
-            if line.split()[0] == 'CONECT':
-                for element in line.split()[1:]:
-                    if element in HETAM_num_list:
-                        line_list.append(line)
-                        break
-
-        ligand_io = ''.join(line_list)
-
-        # Debugging
-        print(ligand_io)
-
-        return ligand_io, chain
-
-    def generate_graph_from_pdb(self, pdb_file):
-        """
-        Generates a graph representation of a molecule using NetworkX
-
-        :param pdb_file: Iterable containing information on molecule connectivity in PDB format. Iterable should either
-        be a list or an opened instance of a .pdb file
-        :return: 
-        """
-        pass
-
-    def clean_pdbs(self):
-        """
-        Clean up PDBs for fragment alignments.
-        * Extract chain with target ligand bound
-
-        :return:
-        """
-        pass

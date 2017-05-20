@@ -55,7 +55,7 @@ import os
 import sys
 import pprint
 from .fragments import Fragments
-from .alignments import Alignments
+from .alignments import Alignments, Align_PDB
 from .clustering import Cluster
 from .utils import *
 
@@ -105,11 +105,11 @@ def main():
                 # Check if ligand is in exclusion list
                 if ligand not in exclude_ligand_list:
 
-                    align = Alignments(working_directory, current_fragment, ligand, processed_PDBs_path)
+                    prepare_ligand = Alignments(working_directory, current_fragment, ligand, processed_PDBs_path)
 
                     # Each PDB containing a fragment-containing compound
                     for pdb in pdb_check(fcc):
-                        pdbid = os.path.basename(os.path.normpath(pdb)) # ASDF.pdb
+                        pdbid = os.path.basename(os.path.normpath(pdb))
 
                         # Check if PDB has already been processed
                         rejected_list_path = os.path.join(processed_PDBs_path, 'rejected_PDBs.txt')
@@ -123,11 +123,12 @@ def main():
                         if not processed_check(processed_dir, pdbid, rejected_list):
                             # Set things up! Get ligands from Ligand Expo
                             # This is to avoid downloading ligands when all PDBs have already been processed
-                            align.fetch_records()
+                            prepare_ligand.fetch_records()
 
+                            align = Align_PDB(prepare_ligand)
                             # Extract HETATM and CONECT records for the target ligand
                             # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-                            reject, lig_request_suffix, ligand_records, ligand_chain, ligand_resnum = align.fetch_specific_ligand_record(pdb)
+                            reject = align.fetch_specific_ligand_record(pdb)
 
                             # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
                             if reject:
@@ -136,26 +137,26 @@ def main():
 
                             # Continue if PDB has not been processed, rejected, or excluded by the user
                             else:
-
                                 # Mapping of fragment atoms to target ligand atoms
-                                pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
-                                fragment_target_mapping, target_mol_PDB_Block = align.fragment_target_mapping(pdb_path, ligand_records)
+                                align.pdb_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                                mapping_successful = align.fragment_target_mapping()
 
-                                if fragment_target_mapping == None or target_mol_PDB_Block == None:
+                                if not mapping_successful:
                                     with open(rejected_list_path, 'a+') as reject_list:
                                         reject_list.write('{}\n'.format(pdbid))
                                     continue
 
                                 # Determine translation vector and rotation matrix
-                                transformation_matrix = align.determine_rotation_and_translation(fragment_target_mapping, pdb_path, target_mol_PDB_Block)
+                                transformation_matrix = align.determine_rotation_and_translation()
                                 # print(transformation_matrix.getMatrix())
 
                                 # Apply transformation to protein_ligand complex
-                                align.apply_transformation(transformation_matrix, pdb, lig_request_suffix, ligand, ligand_chain, ligand_resnum)
+                                align.apply_transformation(transformation_matrix)
 
                         else:
                             print('{} exists!'.format(pdb))
     if args['cluster']:
-        cluster = Cluster(args['<user_defined_dir>'])
-        cluster.cluster()
+        for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
+            cluster = Cluster(args['<user_defined_dir>'], os.path.basename(os.path.normpath(fragment)), [1,1,1,1])
+            cluster.cluster()
 
