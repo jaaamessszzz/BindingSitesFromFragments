@@ -157,6 +157,7 @@ def main():
                             print('{} exists!'.format(pdb))
     if args['cluster']:
         for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-            cluster = Cluster(args['<user_defined_dir>'], os.path.basename(os.path.normpath(fragment)), [1,1,1,1])
+            cluster = Cluster(fragment, [2,1,1,1])
             cluster.cluster()
+            cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
 

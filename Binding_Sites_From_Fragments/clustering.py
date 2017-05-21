@@ -17,6 +17,7 @@ class Cluster():
         self.processed_PDBs_dir = processed_PDBs_dir
         self.weights = weights
         self.pdb_object_list = self._import_pdbs()
+        self.clusters = None
 
     def _import_pdbs(self):
         """
@@ -28,7 +29,13 @@ class Cluster():
         processsed_residue_list = []
         for pdb in pdb_check(self.processed_PDBs_dir):
             pdb_info = os.path.basename(os.path.normpath(pdb))
-            prody_protein_hv = prody.parsePDB(pdb).select('protein').getHierView()
+            prody_protein = prody.parsePDB(pdb).select('protein')
+            # Check that residues exist within cutoff distance provided in alignments, otherwise pass
+            if prody_protein == None:
+                continue
+            else:
+                prody_protein_hv = prody_protein.getHierView()
+
             prody_ligand = prody.parsePDB(pdb).select('resname {}'.format(pdb_info.split('_')[1]))
 
             # Iterate over residues in contacts and generate representative vector with weights applied
@@ -49,9 +56,26 @@ class Cluster():
         from sklearn import metrics
 
         # asdf = DBSCAN().fit_predict([thingy.vector for thingy in self.pdb_object_list])
-        asdf = AgglomerativeClustering(n_clusters=6).fit_predict([thingy.vector for thingy in self.pdb_object_list])
 
-        print(asdf)
+        self.clusters = AgglomerativeClustering(n_clusters=6).fit_predict([thingy.vector for thingy in self.pdb_object_list])
+
+    def generate_output_directories(self, base_dir, fragment_path):
+        residue_cluster_pairs = [(cluster, residue)for cluster, residue in zip(self.clusters, self.pdb_object_list)]
+        fragment = os.path.basename(os.path.normpath(fragment_path))
+
+        for cluster in set(self.clusters):
+            residue_list = [pair for pair in residue_cluster_pairs if pair[0] == cluster]
+            fragment_cluster_path = os.path.join(base_dir,
+                                     'Cluster_Results',
+                                     fragment,
+                                     'Cluster_{}'.format(str(cluster)))
+            os.makedirs(fragment_cluster_path,
+                        exist_ok=True)
+            count=0
+            for residue in residue_list:
+                prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}_Resdiue_{1}.pdb'.format(cluster, str(count))), residue[1].prody_residue)
+                count += 1
+
 
 class fragment_PDB():
     """
