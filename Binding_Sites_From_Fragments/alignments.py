@@ -81,6 +81,7 @@ class Align_PDB(Alignments):
     :param lig_request_suffix: file name of target ligand PDB fetched from LigandExpo
     :param ligand_chain: Chain ID of target ligand used for alignment
     :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
+    :param target_fragment_atom_names: names of atoms in target fragment
     """
     def __init__(self, Alignments):
         self.__dict__ = Alignments.__dict__
@@ -90,6 +91,7 @@ class Align_PDB(Alignments):
         self.lig_request_suffix = None
         self.ligand_chain = None
         self.ligand_ResSeq_ID = None
+        self.target_fragment_atom_names = None
 
     def fetch_specific_ligand_record(self, pdb_file):
         """
@@ -221,9 +223,6 @@ class Align_PDB(Alignments):
         frag_matches = fragment_mol.GetSubstructMatch(sub_mol)
         target_matches = target_mol.GetSubstructMatches(sub_mol)
 
-        print("\nTarget Matches\n")
-        pprint.pprint(target_matches)
-
         # Maps fragment atom index to target atom index
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
         if len(target_matches) > 1:
@@ -283,6 +282,9 @@ class Align_PDB(Alignments):
         frag_atom_selections = [fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
         trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in target_atom_indices]
 
+        # Save atom names for mapped fragment atoms in target ligand
+        self.target_fragment_atom_names = ' '.join([atom.getNames()[0] for atom in trgt_atom_selections if atom != None])
+
         # Get atom coordinates out of atom objects
         # None is because hydrogens were removed
         frag_atom_coords = np.asarray([atom.getCoords()[0] for atom in frag_atom_selections if atom != None])
@@ -317,8 +319,19 @@ class Align_PDB(Alignments):
         target_pdb = prody.parsePDB(self.pdb_file)
 
         # todo: somehow convert target fragment indicies to atom names that I can use for selection
-        target_shell = target_pdb.select('protein and within 8 of (resname {0} and chain {1} and resnum {2})\
-         or (resname {0} and chain {1} and resnum {2})'.format(self.ligand, self.ligand_chain, self.ligand_ResSeq_ID))
+        # So the reason for these super long selection strings is that the serial numbers from LigandExpo don't match
+        # up with the serial numbers fromthe PDBs for the same chain/residue/atoms...
+        print(self.target_fragment_atom_names)
+
+        target_shell = target_pdb.select('protein and within 8 of\
+        (resname {0} and chain {1} and resnum {2} and name {3}) or\
+        (resname {0} and chain {1} and resnum {2} and name {3})'
+                                         .format(self.ligand,
+                                                 self.ligand_chain,
+                                                 self.ligand_ResSeq_ID,
+                                                 self.target_fragment_atom_names
+                                                 )
+                                         )
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
         prody.writePDB(os.path.join(self.processed_PDBs_path, '{}processed.pdb'.format(self.lig_request_suffix)), transformed_pdb)
