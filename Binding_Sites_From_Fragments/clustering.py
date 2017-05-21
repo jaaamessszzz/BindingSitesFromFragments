@@ -11,7 +11,6 @@ from .utils import *
 class Cluster():
     """
     This class is responsible for taking aligned fragment PDBs and identifying representative contacts. 
-    
     """
 
     def __init__(self, processed_PDBs_dir, weights):
@@ -45,7 +44,14 @@ class Cluster():
         
         :return: 
         """
-        pprint.pprint(self.pdb_object_list)
+        from sklearn.cluster import DBSCAN
+        from sklearn.cluster import AgglomerativeClustering
+        from sklearn import metrics
+
+        # asdf = DBSCAN().fit_predict([thingy.vector for thingy in self.pdb_object_list])
+        asdf = AgglomerativeClustering(n_clusters=6).fit_predict([thingy.vector for thingy in self.pdb_object_list])
+
+        print(asdf)
 
 class fragment_PDB():
     """
@@ -155,25 +161,23 @@ class fragment_PDB():
         bb_c_ca = 1 if residue_contact_atom.getNames()[0] in ['C', 'CA'] else 0
 
         residue_vector = [
-            vector[0],
-            vector[1],
-            vector[2],
-            min_contact_distance,
-            residue_contact_type,
-            ligand_contact_type,
-            h_bond_donor_acceptor,
-            greasy_ali,
-            greasy_aro,
-            polar,
-            charged_acid,
-            charged_basic,
-            glycine,
-            proline,
-            bb_carbonyl,
-            bb_amino,
-            bb_c_ca
+            vector[0] * self.weights[0],
+            vector[1] * self.weights[0],
+            vector[2] * self.weights[0],
+            min_contact_distance * self.weights[0],
+            residue_contact_type * self.weights[1],
+            ligand_contact_type * self.weights[1],
+            h_bond_donor_acceptor * self.weights[1],
+            greasy_ali * self.weights[2],
+            greasy_aro * self.weights[2],
+            polar * self.weights[2],
+            charged_acid * self.weights[2],
+            charged_basic * self.weights[2],
+            glycine * self.weights[2],
+            proline * self.weights[2],
+            bb_carbonyl * self.weights[3],
+            bb_amino * self.weights[3],
+            bb_c_ca * self.weights[3]
         ]
 
-        print(residue_vector)
-
-        return residue_vector
+        return np.asarray(residue_vector)
