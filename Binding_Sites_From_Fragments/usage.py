@@ -23,7 +23,7 @@ Usage:
     bsff generate_fragments <ligand> [options]
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
-    bsff cluster <user_defined_dir>
+    bsff cluster <user_defined_dir> [options]
 
 Arguments:
     generate_fragments
@@ -48,6 +48,17 @@ Arguments:
 Options:
     -f --ligand_input_format <format>
         Use a different input format for the ligand. [CID|name|smiles]
+    
+    -c --clusters
+        Set number of clusters
+        
+    -d --distance_cutoff
+        Distance cutoff in angstroms for residues to consider in clustering
+        
+    -w --weights
+        Comma separated values for representative vector weights
+        
+    
 
 """
 import docopt
@@ -157,7 +168,18 @@ def main():
                             print('{} exists!'.format(pdb))
     if args['cluster']:
         for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-            cluster = Cluster(fragment, [2,1,1,1])
-            cluster.cluster()
-            cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
+            # processed_PDBs_dir, distance_cutoff, number_of_clusters, weights
+
+            # Set weights
+            weights = args['--weights'] if args['--weights'] else [1,1,1,1]
+            # Set distance cutoff
+            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 3
+            # Set number of clusters
+            number_of_clusters = args['--clusters'] if args['--clusters'] else 6
+
+            cluster = Cluster(fragment, distance_cutoff, number_of_clusters, weights)
+            # cluster.cluster_sklearn_agglomerative()
+            cluster.cluster_scipy()
+            if cluster.clusters is not None:
+                cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
 
