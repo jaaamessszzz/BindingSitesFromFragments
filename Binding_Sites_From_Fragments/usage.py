@@ -173,7 +173,7 @@ def main():
             # Set weights
             weights = args['--weights'] if args['--weights'] else [1,1,1,1]
             # Set distance cutoff
-            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 3
+            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 4
             # Set number of clusters
             number_of_clusters = args['--clusters'] if args['--clusters'] else 6
 

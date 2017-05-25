@@ -323,7 +323,8 @@ class Align_PDB(Alignments):
         # up with the serial numbers fromthe PDBs for the same chain/residue/atoms...
         print(self.target_fragment_atom_names)
 
-        target_shell = target_pdb.select('protein and within 5 of\
+        # This step is so slow...
+        target_shell = target_pdb.select('protein and within 10 of\
         (resname {0} and chain {1} and resnum {2} and name {3}) or\
         (resname {0} and chain {1} and resnum {2} and name {3})'
                                          .format(self.ligand,
