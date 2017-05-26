@@ -5,18 +5,24 @@ Utility functions!
 """
 import os
 
-def directory_check(dir):
+def directory_check(dir, base_only=False):
     for subdir in os.listdir(dir):
         path = os.path.join(dir, subdir)
         if os.path.isdir(path):
-            yield path
+            if base_only:
+                yield subdir
+            else:
+                yield path
 
 
-def pdb_check(dir):
+def pdb_check(dir, base_only=False):
     for file in os.listdir(dir):
         path = os.path.join(dir, file)
         if path.endswith('.pdb'):
-            yield path
+            if base_only:
+                yield file
+            else:
+                yield path
 
 def processed_check(processed_dir, pdb, rejected_list):
     pdbid = pdb.split('.')[0].upper()

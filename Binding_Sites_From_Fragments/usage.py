@@ -24,6 +24,8 @@ Usage:
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
+    bsff generate_motifs <user_defined_dir> [options]
+    bsff bind <user_defined_dir> [options]
 
 Arguments:
     generate_fragments
@@ -37,6 +39,12 @@ Arguments:
     
     cluster
         Identify representitive residue contacts with each aligned fragment ensemble
+        
+    generate_motifs
+        Generate motif residues from clusters specified in Inputs/motif_clusters.yml
+    
+    bind
+        Generate hypothetical binding sites based on motif residues
         
     <ligand>
         By default, this is the name of the target ligand. This can be changed
@@ -65,9 +73,11 @@ import docopt
 import os
 import sys
 import pprint
+import yaml
 from .fragments import Fragments
 from .alignments import Alignments, Align_PDB
 from .clustering import Cluster
+from .motifs import Generate_Motif_Residues
 from .utils import *
 
 def main():
@@ -182,4 +192,12 @@ def main():
             cluster.cluster_scipy()
             if cluster.clusters is not None:
                 cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
+
+    if args['generate_motifs']:
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'motif_clusters.yml'), 'r'))
+        motifs = Generate_Motif_Residues(os.path.join(args['<user_defined_dir>'], 'Cluster_Results'), motif_cluster_yaml)
+        motifs.generate_motif_residues()
+
+    if args['bind']:
+        print('hi')
 

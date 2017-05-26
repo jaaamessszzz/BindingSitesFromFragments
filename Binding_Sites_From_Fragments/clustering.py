@@ -30,6 +30,7 @@ class Cluster():
         """
         processsed_residue_list = []
         for pdb in pdb_check(self.processed_PDBs_dir):
+            # todo: somehow get original filename out of prody_residue
             pdb_info = os.path.basename(os.path.normpath(pdb))
             prody_protein = prody.parsePDB(pdb).select('protein')
             # Check that residues exist within cutoff distance provided in alignments, otherwise pass
@@ -43,7 +44,7 @@ class Cluster():
             # Iterate over residues in contacts and generate representative vector with weights applied
             for chain in prody_protein_hv:
 
-                processsed_residue_list += [fragment_PDB(residue, prody_ligand, self.distance_cutoff, self.weights) for residue in chain]
+                processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.distance_cutoff, self.weights) for residue in chain]
 
         processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.vector is not None]
 
@@ -117,9 +118,10 @@ class Cluster():
 
             # Output residue PDBs for each cluster
             # todo: add all residues to a single object and export that... the current onslaught of individual PDBs is way too intense
+            # todo: somehow get original filename out of prody_residue
             count=0
             for residue in residue_list:
-                prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}_Resdiue_{1}.pdb'.format(cluster, str(count))), residue[1].prody_residue)
+                prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(count), residue[1].pdb_info)), residue[1].prody_residue)
                 count += 1
 
         # Export .csv
@@ -168,9 +170,10 @@ class fragment_PDB():
     :param pdbid:
     :param vector:
     """
-    def __init__(self, prody_residue, prody_ligand, distance_cutoff, weights):
+    def __init__(self, prody_residue, pdb_info, prody_ligand, distance_cutoff, weights):
         self.prody_residue = prody_residue
         self.prody_ligand = prody_ligand
+        self.pdb_info = pdb_info
         self.residue_center = prody.calcCenter(prody_residue)
         self.ligand_center = prody.calcCenter(prody_ligand)
         self.distance_cutoff = distance_cutoff

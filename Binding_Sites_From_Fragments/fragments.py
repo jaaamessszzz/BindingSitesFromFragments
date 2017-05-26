@@ -241,6 +241,7 @@ class Fragments():
                             current_download.close()
                     except Exception as e:
                         print(e)
+                        continue
                 else:
                     print(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), "exists! Moving on...")
 
