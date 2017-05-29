@@ -150,13 +150,13 @@ class Generate_Binding_Sites():
                             binding_residue_list.append(prody.parsePDB(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs', pdb)))
                             cluster_sum += int(pdb.split('-')[1])
 
-            # Combine all residues into the same file, including the ligand
-            complete_binding_site = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', '{}.pdb'.format(os.path.normpath(self.user_defined_dir))))
-            for binding_residue in binding_residue_list:
-                complete_binding_site = complete_binding_site + binding_residue
+                # Combine all residues into the same file, including the ligand
+                complete_binding_site = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', '{}.pdb'.format(os.path.normpath(self.user_defined_dir))))
+                for binding_residue in binding_residue_list:
+                    complete_binding_site = complete_binding_site + binding_residue
 
-           # Output PDB
-            prody.writePDB(os.path.join(output_path, 'TEST.pdb'), complete_binding_site)
+                # Output PDB
+                prody.writePDB(os.path.join(output_path, '{0}-{1}.pdb'.format(cluster_sum, '_'.join([str(a) for a in residue_combination]))), complete_binding_site)
 
 
     def generate_constraints(self):

@@ -20,6 +20,7 @@ that these interactions will be contributing the majority of binding energy as
 well as binding specificity.
 
 Usage:
+    bsff new <compound_name>
     bsff generate_fragments <ligand> [options]
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
@@ -28,6 +29,9 @@ Usage:
     bsff bind <user_defined_dir> [options]
 
 Arguments:
+    new
+        Sets up a new project with template input files and instructions
+        
     generate_fragments
         Generate fragments for a given compound
     
@@ -89,12 +93,15 @@ def main():
     else:
         working_directory = os.path.curdir
 
-    frag = Fragments(working_directory)
+    if args['new']:
+        print('Starting a new project for {}'.format(args['<compound_name>']))
 
     if args['generate_fragments']:
+        frag = Fragments(working_directory)
         frag.generate_fragements_from_ligand(args['<ligand>'])
 
     if args['search']:
+        frag = Fragments(working_directory)
         frag.search_for_fragment_containing_ligands()
 
     if args['align']:
