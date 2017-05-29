@@ -44,15 +44,14 @@ class Generate_Motif_Residues():
                 if cluster_number in self.fragment_cluster_list[fragment]:
                     fragment_prody_dict[fragment][cluster_number].append(prody.parsePDB(os.path.join(fragment_cluster_path, fragment_pdb)).select('not hydrogen'))
 
-        pprint.pprint(fragment_prody_dict)
-
         # Okay, cool. Now that I have all of my clusters neatly organized in a dict, I can go through and generate motif
         # residues from each of the clusters based on residue type
 
-        fragment_output_dir = os.path.join(os.path.split(self.cluster_path)[0], 'Representative_Residue_Motifs')
+        fragment_output_dir = os.path.join(os.path.split(self.cluster_path)[0], 'Representative_Residue_Motifs', 'Unfiltered_Residues')
         os.makedirs(fragment_output_dir, exist_ok=True)
 
         # Start going through fragments and clusters
+        total_motif_count = 1
         for fragment in fragment_prody_dict:
             motif_count = 1
 
@@ -64,25 +63,39 @@ class Generate_Motif_Residues():
                     # Calculate average residue coordinates
                     cluster_residues = [residue for residue in fragment_prody_dict[fragment][cluster]
                                         if all([residue.getResnames()[0] == res, len(residue) == self.expected_atoms[residue.getResnames()[0]]])]
-                    average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
 
-                    # Select residue closest to average
-                    rmsd_list = [prody.calcRMSD(average_coordinates, residue.getCoords()) for residue in cluster_residues]
-                    representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
+                    if len(cluster_residues) > 0:
+                        average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
 
-                    # Debugging
-                    print(rmsd_list)
-                    print(min(rmsd_list))
-                    print(average_coordinates)
-                    print(representative_residue.getCoords())
-                    print(prody.calcRMSD(average_coordinates, representative_residue.getCoords()))
+                        # Select residue closest to average
+                        rmsd_list = [prody.calcRMSD(average_coordinates, residue.getCoords()) for residue in cluster_residues]
+                        representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
 
-                    # Output residue
-                    prody.writePDB(os.path.join(fragment_output_dir,
-                                                '{0}-Cluster_{1}-Motif-{2}-{3}.pdb'.format(fragment, cluster, motif_count, res)),
-                                   representative_residue)
+                        # Output residue
+                        try:
+                            prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif-{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
+                                           representative_residue)
+                            total_motif_count += 1
+                        except Exception as e:
+                            print(e)
+                            continue
 
                 motif_count += 1
+
+        self.filter_representative_residues(fragment_output_dir)
+
+    def filter_representative_residues(self, unfiltered_dir, cutoff_distance=2):
+        """
+        Filters out residues that are too close to the ligand molecule
+        :return: 
+        """
+        target_molecule = os.path.split(self.cluster_path)[0]
+        target_molecule_prody = prody.parsePDB(os.path.join(target_molecule, 'Inputs', '{}.pdb'.format(target_molecule))).select('not hydrogen')
+
+        for residue in pdb_check(unfiltered_dir):
+            residue_prody = prody.parsePDB(residue).select('not hydrogen')
+            if minimum_contact_distance(residue_prody.getCoords(), target_molecule_prody.getCoords()) >= cutoff_distance:
+                prody.writePDB(os.path.join(os.path.split(unfiltered_dir)[0], '{}'.format(os.path.basename(os.path.normpath(residue)))), residue_prody)
 
     def define_second_shell_contants(self):
         """
@@ -97,15 +110,54 @@ class Generate_Binding_Sites():
     User input required to deal with residues that obviously do not get along with other motif residues or the ligand
     e.g. steric clashing, non-favorable interactions
     """
-    def __init__(self, residue_groups):
+    def __init__(self, user_defined_dir, residue_groups, hypothetical_binding_sites):
+        self.user_defined_dir = user_defined_dir
         self.residue_groups = residue_groups
+        self.hypothetical_binding_sites = hypothetical_binding_sites
 
     def generate_binding_sites(self):
         """
-        sup.
+        This method takes the user defined residue groups and combines them as specified in the hypothetical_binding_sites
+        yaml file. This method will output all hypothetical binding sites into a new directory and rank them based on the
+        sum total of cluster members from which the representative residues were derived.
+        
+        {Rank}-{res_#}_{res_#}_{res_#}_{res_#}-{Description}.pdb
+        
         :return: 
         """
-        pass
+        import itertools
+
+        # For each hypothetical binding site defined in the yaml file
+        for hbs in self.hypothetical_binding_sites:
+            # Generate output path
+            output_path = os.path.join(self.user_defined_dir, 'Hypothetical_Binding_Sites', hbs)
+            os.makedirs(output_path, exist_ok=True)
+
+            # Generate all possible residue combinations for all positions defined
+            list_of_residue_combinations = itertools.product(*[self.residue_groups[group] for group in self.hypothetical_binding_sites[hbs]])
+
+            # For each unique binding site
+            for residue_combination in list_of_residue_combinations:
+
+                binding_residue_list = []
+                # Open all residue pdbs from representative binding residues directory as defined in list
+                # Calculate sum of all cluster representitives
+                cluster_sum = 0
+
+                for residue in residue_combination:
+                    for pdb in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'), base_only=True):
+                        if pdb.split('-')[0] == str(residue):
+                            binding_residue_list.append(prody.parsePDB(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs', pdb)))
+                            cluster_sum += int(pdb.split('-')[1])
+
+            # Combine all residues into the same file, including the ligand
+            complete_binding_site = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', '{}.pdb'.format(os.path.normpath(self.user_defined_dir))))
+            for binding_residue in binding_residue_list:
+                complete_binding_site = complete_binding_site + binding_residue
+
+           # Output PDB
+            prody.writePDB(os.path.join(output_path, 'TEST.pdb'), complete_binding_site)
+
 
     def generate_constraints(self):
         """

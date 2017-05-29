@@ -77,7 +77,7 @@ import yaml
 from .fragments import Fragments
 from .alignments import Alignments, Align_PDB
 from .clustering import Cluster
-from .motifs import Generate_Motif_Residues
+from .motifs import Generate_Motif_Residues, Generate_Binding_Sites
 from .utils import *
 
 def main():
@@ -199,5 +199,7 @@ def main():
         motifs.generate_motif_residues()
 
     if args['bind']:
-        print('hi')
-
+        motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'motif_residue_bins.yml'), 'r'))
+        hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'hypothetical_binding_sites.yml'), 'r'))
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
+        bind.generate_binding_sites()
