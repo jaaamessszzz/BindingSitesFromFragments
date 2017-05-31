@@ -151,7 +151,17 @@ def main():
                         if not processed_check(processed_dir, pdbid, rejected_list):
                             # Set things up! Get ligands from Ligand Expo
                             # This is to avoid downloading ligands when all PDBs have already been processed
-                            prepare_ligand.fetch_records()
+
+                            # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
+                            # I can't believe how unorganized everything is, damn.
+                            try:
+                                prepare_ligand.fetch_records()
+
+                            except Exception as e:
+                                print('{}: {}'.format(pdbid,e))
+                                with open(rejected_list_path, 'a+') as reject_list:
+                                    reject_list.write('{}\n'.format(pdbid))
+                                continue
 
                             align = Align_PDB(prepare_ligand)
                             # Extract HETATM and CONECT records for the target ligand
@@ -182,7 +192,7 @@ def main():
                                 align.apply_transformation(transformation_matrix)
 
                         else:
-                            print('{} exists!'.format(pdb))
+                            print('{} has been processed!'.format(pdb))
     if args['cluster']:
         for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
             # processed_PDBs_dir, distance_cutoff, number_of_clusters, weights
@@ -195,8 +205,10 @@ def main():
             number_of_clusters = args['--clusters'] if args['--clusters'] else 6
 
             cluster = Cluster(fragment, distance_cutoff, number_of_clusters, weights)
-            # cluster.cluster_sklearn_agglomerative()
-            cluster.cluster_scipy()
+
+            if len(cluster.pdb_object_list) > 2:
+                cluster.cluster_scipy()
+
             if cluster.clusters is not None:
                 cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
 

@@ -299,6 +299,7 @@ class Align_PDB(Alignments):
 
         :return: Prody transformation object with rotation and translation matrix/vector
         """
+        # todo: implement an option for RMSD cutoff where mapped atoms do not necessarily have the same conformations, e.g. sugar pucker
         frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
@@ -324,7 +325,7 @@ class Align_PDB(Alignments):
         print(self.target_fragment_atom_names)
 
         # This step is so slow...
-        target_shell = target_pdb.select('protein and within 10 of\
+        target_shell = target_pdb.select('protein and within 12 of\
         (resname {0} and chain {1} and resnum {2} and name {3}) or\
         (resname {0} and chain {1} and resnum {2} and name {3})'
                                          .format(self.ligand,

@@ -223,18 +223,8 @@ class fragment_PDB():
         
         :return: 
         """
-        ligand_residue_distance_matrix = prody.buildDistMatrix(self.prody_residue, self.prody_ligand)
 
-        # Find minimum score in matrix
-        row_min_indicies = np.amin(ligand_residue_distance_matrix, axis=0)
-        ligand_index = np.argmin(row_min_indicies, axis=0)
-        residue_index = np.argmin(ligand_residue_distance_matrix, axis=0)
-
-        column_index_low = ligand_index
-        row_index_low = residue_index[column_index_low]
-
-        # Contact distance
-        min_contact_distance = ligand_residue_distance_matrix.item(row_index_low, column_index_low)
+        min_contact_distance, row_index_low, column_index_low = minimum_contact_distance(self.prody_residue, self.prody_ligand, return_indices=True)
 
         if min_contact_distance > self.distance_cutoff:
             return None

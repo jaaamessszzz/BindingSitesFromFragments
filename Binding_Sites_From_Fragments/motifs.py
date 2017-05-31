@@ -6,6 +6,7 @@ import numpy as np
 import prody
 import pprint
 import re
+import itertools
 from .utils import *
 
 class Generate_Motif_Residues():
@@ -72,13 +73,9 @@ class Generate_Motif_Residues():
                         representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
 
                         # Output residue
-                        try:
-                            prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif-{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
-                                           representative_residue)
-                            total_motif_count += 1
-                        except Exception as e:
-                            print(e)
-                            continue
+                        prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif-{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
+                                       representative_residue)
+                        total_motif_count += 1
 
                 motif_count += 1
 
@@ -125,8 +122,6 @@ class Generate_Binding_Sites():
         
         :return: 
         """
-        import itertools
-
         # For each hypothetical binding site defined in the yaml file
         for hbs in self.hypothetical_binding_sites:
             # Generate output path
@@ -150,18 +145,36 @@ class Generate_Binding_Sites():
                             binding_residue_list.append(prody.parsePDB(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs', pdb)))
                             cluster_sum += int(pdb.split('-')[1])
 
-                # Combine all residues into the same file, including the ligand
-                complete_binding_site = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', '{}.pdb'.format(os.path.normpath(self.user_defined_dir))))
-                for binding_residue in binding_residue_list:
-                    complete_binding_site = complete_binding_site + binding_residue
+                # Simple distance check for all residues to prevent clashing
+                clashing = False
+                cutoff_distance = 2
 
-                # Output PDB
-                prody.writePDB(os.path.join(output_path, '{0}-{1}.pdb'.format(cluster_sum, '_'.join([str(a) for a in residue_combination]))), complete_binding_site)
+                for outer_index, a in enumerate(binding_residue_list):
+                    for inner_index, b in enumerate(binding_residue_list[(outer_index+1):]):
+                        if minimum_contact_distance(a.getCoords(), b.getCoords()) < cutoff_distance:
+                            clashing = True
+                            print('CLASHING!!!!~!!!!!!!!')
+
+                # Proceed to generating and outputting binding site if non-clashing
+                if not clashing:
+                    # Combine all residues into the same file, including the ligand
+                    complete_binding_site = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', '{}.pdb'.format(os.path.normpath(self.user_defined_dir))))
+                    for binding_residue in binding_residue_list:
+                        complete_binding_site = complete_binding_site + binding_residue
+
+                    # Generate Constraints
+                    binding_site_description = '{0}-{1}.pdb'.format(cluster_sum, '_'.join([str(a) for a in residue_combination]))
+                    self.generate_constraints(binding_site_description, complete_binding_site)
+
+                    # Output PDB
+                    prody.writePDB(os.path.join(output_path, binding_site_description), complete_binding_site)
 
 
-    def generate_constraints(self):
+    def generate_constraints(self, binding_site_description, prody_binding_site):
         """
-        Generate matcher constraints for a given hypothetical binding site.
+        Generate matcher constraints for a given hypothetical binding site using information from clusters
+        
         :return: 
         """
-        pass
+        # For residue in binding site
+        for residue in prody_binding_site
