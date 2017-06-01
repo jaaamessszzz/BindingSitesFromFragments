@@ -47,8 +47,8 @@ Arguments:
     generate_motifs
         Generate motif residues from clusters specified in Inputs/motif_clusters.yml
     
-    bind
-        Generate hypothetical binding sites based on motif residues
+    bind_by_hand
+        Generate hypothetical binding sites based on motif residues bins defined by the user
         
     <ligand>
         By default, this is the name of the target ligand. This can be changed
@@ -58,18 +58,21 @@ Arguments:
         Directory defined by user containing PubChem search results
 
 Options:
-    -f --ligand_input_format <format>
-        Use a different input format for the ligand. [CID|name|smiles]
-    
-    -c --clusters
+    -c --clusters <clusters>
         Set number of clusters
         
-    -d --distance_cutoff
+    -d --distance_cutoff <distance_cutoff>
         Distance cutoff in angstroms for residues to consider in clustering
         
-    -w --weights
-        Comma separated values for representative vector weights
+    -f --ligand_input_format <format>
+        Use a different input format for the ligand. [CID|name|smiles]
         
+    -r --rosetta_scores
+        Calculate Rosetta score terms for unique residue-ligand interactions duoring the motif residue generation step
+    
+    -w --weights <weights>
+        Comma separated values for representative vector weights
+    
     
 
 """
@@ -112,14 +115,14 @@ def main():
         # Three-letter ligand codes (UPPER CASE)
         # e.g. IMD, so much randomly bound IMD everywhere
         exclude_ligand_list = []
-        exclude_txt = os.path.join(working_directory, 'Inputs', 'Exclude_ligands.txt')
+        exclude_txt = os.path.join(working_directory, 'Inputs', 'User_Inputs', 'Exclude_Ligands.txt')
         if os.path.exists(exclude_txt):
             with open(exclude_txt, 'r') as exlude_ligands:
                 exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
 
         # Fragment_1, Fragment_2, ...
         for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
-            fragment_pdb = os.path.join(working_directory, 'Inputs')
+            fragment_pdb = os.path.join(working_directory, 'Inputs', 'User_Inputs')
             current_fragment = os.path.basename(fragment)
 
             # Create directory for processed PDBs
@@ -140,7 +143,7 @@ def main():
                         pdbid = os.path.basename(os.path.normpath(pdb))
 
                         # Check if PDB has already been processed
-                        rejected_list_path = os.path.join(processed_PDBs_path, 'rejected_PDBs.txt')
+                        rejected_list_path = os.path.join(processed_PDBs_path, 'Rejected_PDBs.txt')
                         rejected_list = []
                         if os.path.exists(rejected_list_path):
                             with open(rejected_list_path, 'r') as rejected_PDBs:
@@ -198,7 +201,7 @@ def main():
             # processed_PDBs_dir, distance_cutoff, number_of_clusters, weights
 
             # Set weights
-            weights = args['--weights'] if args['--weights'] else [1,1,1,1]
+            weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1,1,1,1]
             # Set distance cutoff
             distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 4
             # Set number of clusters
@@ -213,12 +216,13 @@ def main():
                 cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
 
     if args['generate_motifs']:
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'motif_clusters.yml'), 'r'))
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
+        # Generate motif residues for each ligand conformer
         motifs = Generate_Motif_Residues(os.path.join(args['<user_defined_dir>'], 'Cluster_Results'), motif_cluster_yaml)
         motifs.generate_motif_residues()
 
-    if args['bind']:
-        motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'motif_residue_bins.yml'), 'r'))
-        hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'hypothetical_binding_sites.yml'), 'r'))
+    if args['bind_by_hand']:
+        motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'r'))
+        hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'r'))
         bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
-        bind.generate_binding_sites()
+        bind.generate_binding_sites_by_hand()

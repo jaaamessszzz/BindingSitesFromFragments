@@ -137,8 +137,9 @@ class Fragments():
         # Falling back to manually doing the searches on Pubchem and downloading the detailed search results
         # Name each search using the SMILES string to simplify things
 
-        fragment_inputs = pd.read_csv("{}/Inputs/Fragment_inputs.csv".format(self.user_defined_dir))
-        search_dir = "{}/Inputs".format(self.user_defined_dir)
+        # todo: os.path.join...? Why didn't I do this the first time around?
+        fragment_inputs = pd.read_csv("{}/Inputs/Fragment_Inputs/Fragment_inputs.csv".format(self.user_defined_dir))
+        search_dir = "{}/Fragment_Inputs/Inputs".format(self.user_defined_dir)
 
         for index, search_query in fragment_inputs.iterrows():
             # Using Pubchem API (if I could get it to work...)
