@@ -19,9 +19,7 @@ class Alignments():
     fragments.
     """
 
-    def __init__(self, user_defined_dir, fragment, ligand, processed_PDBs_path):
-        self.user_defined_dir = user_defined_dir
-        self.fragment = fragment
+    def __init__(self, ligand='DERP', processed_PDBs_path=None):
         self.ligand = ligand.upper()
         self.processed_PDBs_path = processed_PDBs_path
         # Initialized later
@@ -75,19 +73,19 @@ class Alignments():
 class Align_PDB(Alignments):
     """
     Subclass with functions for aligning individual PDBs
-    :param pdb_file: path to input PDB containing protein bound to fragment-containing target molecule
-    :param target_string: string of PDB for target ligand, fetched from LigandExpo
-    :param fragment_path: path to PDB of current fragment
+    :param pdb_file: path to input PDB containing protein bound to fragment-containing target molecule (MOBILE)
+    :param target_string: string of PDB for target ligand, fetched from LigandExpo (MOBILE)
+    :param fragment_path: path to PDB of current fragment (TARGET)
     :param lig_request_suffix: file name of target ligand PDB fetched from LigandExpo
     :param ligand_chain: Chain ID of target ligand used for alignment
     :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
     :param target_fragment_atom_names: names of atoms in target fragment
     """
-    def __init__(self, Alignments):
+    def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_string=None):
         self.__dict__ = Alignments.__dict__
-        self.pdb_file = None 
-        self.target_string = None
-        self.fragment_path = None
+        self.pdb_file = pdb_file # Mobile PDB File to be aligned to a target
+        self.target_string = target_string
+        self.fragment_string = fragment_string
         self.lig_request_suffix = None
         self.ligand_chain = None
         self.ligand_ResSeq_ID = None
@@ -182,22 +180,16 @@ class Align_PDB(Alignments):
 
     def fragment_target_mapping(self):
         """
-        I'm going to utilize NetworkX (shoutout to Kale) for mapping fragment atoms to the corresponding atoms in each
-        of the fragment-containing small molecules. [http://networkx.readthedocs.io]
-
-        To do this, I will need atom and connectivity information for each small molecule to generate the nodes and 
-        edges in the graphs. 
-
-        OR. Or. I talked to Chris today and he showed me this chemoinformatics package called RDKit. This may be a much
+        I talked to Chris today and he showed me this chemoinformatics package called RDKit. This may be a much
         more streamlined method of doing this without needing to resort to subgraphs...
         > https://sourceforge.net/p/rdkit/mailman/message/34549645/
 
         :return: dict mapping fragment atoms to target atoms
         """
-        # todo: ADD ALL THE HYDROGENS
         # Import fragment and target ligand
-        fragment_mol = Chem.MolFromPDBFile(self.fragment_path, removeHs=False)
-        target_mol_H = Chem.MolFromPDBBlock(self.target_string)
+        # todo: standardize this so that both target and fragment inputs are the same type...
+        fragment_mol = Chem.MolFromPDBBlock(self.fragment_string, removeHs=False)
+        target_mol_H = Chem.MolFromPDBBlock(self.target_string, removeHs=False)
 
         # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
         # 3dyb_AD0_1_A_500__B___.ipdb
@@ -236,6 +228,9 @@ class Align_PDB(Alignments):
         self.fragment_target_map = fragment_target_mapping
         self.target_mol_PDB_Block = target_mol_PDB_Block
 
+        # Debugging
+        print(self.fragment_target_map)
+
         return True
 
     def identify_best_substructure(self, frag_matches, target_matches):
@@ -268,7 +263,13 @@ class Align_PDB(Alignments):
     def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping):
         # Fragment and target as prody atom objects (including Hydrogens)
         target_prody_H = prody.parsePDBStream(io.StringIO(self.target_string))
-        fragment_prody_H = prody.parsePDB(self.fragment_path)
+        fragment_prody_H = prody.parsePDBStream(io.StringIO(self.fragment_string))
+
+        # Debugging
+        print('trgt')
+        pprint.pprint([atom for atom in target_prody_H])
+        print('frag')
+        pprint.pprint([atom for atom in fragment_prody_H])
 
         # Fragment and target prody selections (excluding hydrogens)
         target_prody = target_prody_H.select('not hydrogen')
@@ -301,6 +302,10 @@ class Align_PDB(Alignments):
         """
         # todo: implement an option for RMSD cutoff where mapped atoms do not necessarily have the same conformations, e.g. sugar pucker
         frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
+
+        # Debugging
+        print(frag_atom_coords)
+        print(trgt_atom_coords)
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 

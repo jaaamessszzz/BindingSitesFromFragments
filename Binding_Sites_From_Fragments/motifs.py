@@ -5,8 +5,10 @@ import sys
 import numpy as np
 import prody
 import pprint
+import yaml
 import re
 import itertools
+from .alignments import Alignments, Align_PDB
 from .utils import *
 
 class Generate_Motif_Residues():
@@ -18,10 +20,10 @@ class Generate_Motif_Residues():
     2.  Residue-ligand interaction scores as calculated with Rosetta
     3.  Constraint file for each residue-ligand interaction
     """
-    def __init__(self, cluster_path, motif_cluster_yaml):
-        self.cluster_path = cluster_path
+    def __init__(self, user_defined_dir, motif_cluster_yaml):
+        self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
-        # todo: accommodate C-term residues...
+        # todo: accommodate C-term residues... could just add 1 to everything and say either or... sloppy though
         self.expected_atoms = {'ALA': 5, 'CYS': 6, 'ASP': 8, 'GLU': 9, 'PHE': 11, 'GLY': 4, 'HIS': 10, 'ILE': 8,
                                'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
                                'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12}
@@ -41,7 +43,7 @@ class Generate_Motif_Residues():
         # For each cluster in the cluster list
         for fragment in self.fragment_cluster_list:
             fragment_prody_dict[fragment] = {}
-            fragment_cluster_path = os.path.join(self.cluster_path, fragment)
+            fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results', fragment)
 
             # Make a list for each cluster for a given fragment
             for cluster_number in self.fragment_cluster_list[fragment]:
@@ -57,7 +59,7 @@ class Generate_Motif_Residues():
         # Okay, cool. Now that I have all of my clusters neatly organized in a dict, I can go through and generate motif
         # residues from each of the clusters based on residue type
 
-        fragment_output_dir = os.path.join(os.path.split(self.cluster_path)[0], 'Representative_Residue_Motifs', 'Unfiltered_Residues')
+        fragment_output_dir = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
         os.makedirs(fragment_output_dir, exist_ok=True)
 
         # Start going through fragments and clusters
@@ -88,36 +90,126 @@ class Generate_Motif_Residues():
 
                 motif_count += 1
 
-        self.filter_representative_residues(fragment_output_dir)
 
-
-    def filter_representative_residues(self, unfiltered_dir, cutoff_distance=2):
+    def prepare_motifs_for_conformers(self):
         """
-        Filters out residues that are too close to the ligand molecule and outputs the rest as PDBs
+        Prepare things for conformer binding site generation
         :return: 
         """
-        target_molecule = os.path.split(self.cluster_path)[0]
-        # todo: update importing target molecule prody to accommodate conformer libraries
-        target_molecule_prody = prody.parsePDB(os.path.join(target_molecule, 'Inputs', '{}.pdb'.format(target_molecule))).select('not hydrogen')
+        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
+        self.generate_residue_residue_clash_matrix()
+
+
+    def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
+        """
+        Filters representative motif residues that are clashing with the ligand for each conformer in Inputs/Rosetta_Inputs
+        Outputs a yaml file for each conformer with a list of motif residue indicies that clash
+        Clashing is determined by a distance cutoff for the closest atom-atom distance between each residue and the ligand
+        
+        :param motif_residue_dir: directory with representative motif residue PDBs
+        :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
+        :return: 
+        """
 
         # Generate and output a yaml file for each conformer and list which residues clash
         # This way I can output all representative motif residues once and just ignore the ones that clash for each conformer
-        for residue in pdb_check(unfiltered_dir):
-            residue_prody = prody.parsePDB(residue).select('not hydrogen')
-            if minimum_contact_distance(residue_prody.getCoords(), target_molecule_prody.getCoords()) >= cutoff_distance:
-                prody.writePDB(os.path.join(os.path.split(unfiltered_dir)[0], '{}'.format(os.path.basename(os.path.normpath(residue)))), residue_prody)
+        # YAML will be a dict with conformer pdbs as keys and list of residue indices as values
+
+        residue_ligand_clash_dict = {}
+
+        target_molecule = os.path.normpath(self.user_defined_dir)
+        for conformer in pdb_check(os.path.join(target_molecule, 'Inputs','Rosetta_Inputs')):
+            target_molecule_prody = prody.parsePDB(conformer).select('not hydrogen')
+            clashing_residue_indices = []
+            for motif_residue in pdb_check(motif_residue_dir):
+                residue_prody = prody.parsePDB(motif_residue).select('not hydrogen')
+                if minimum_contact_distance(residue_prody.getCoords(), target_molecule_prody.getCoords()) <= cutoff_distance:
+                    residue_index = os.path.basename(motif_residue).split('-')[0]
+                    clashing_residue_indices.append(residue_index)
+            residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
+
+        yaml.dump(residue_ligand_clash_dict, open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
 
 
-    def generate_clash_matrix(self, clashing_cutoff=2):
+    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2):
         """
         Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
         based on the distance of the closest atom-atom interaction between two residues.
         Matrix is output as a .csv that can be imported with numpy.
         
+        :param motif_residue_dir: directory with representative motif residue PDBs
         :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
         :return: 
         """
-        pass
+
+        # Generating dict of Coordinate Lists
+        # I'm only going through upper triangle of matrix, but I'll record both (row, column) and (column, row)
+        residue_residue_clash_dict = {}
+
+        # Fuckkkk
+        # First need to do translation and rotation of all motif residues relative to fragments in new conformations
+        motif_residue_dir = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
+
+        # I derped designing the alignment classes so now this just exists. Hi.
+        herp_derp = Alignments()
+
+        # For each conformer I want to determine motif clashes with...
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')):
+
+            # For each residue...
+            for motif_residue in pdb_check(motif_residue_dir):
+
+                # Parse file name to get fragment, import prody
+                motif_prody = prody.parsePDB(motif_residue)
+                motif_filename = os.path.basename(os.path.normpath(motif_residue))
+                motif_source_fragment = motif_filename.split('-')[2]
+
+                # Map fragment to conformer
+                # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
+                target = open(conformer).read()
+                mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
+                align = Align_PDB(herp_derp, motif_residue, mobile, target)
+                align.fragment_target_mapping()
+
+                # Fuck okay I messed up implementing this
+                # Rotation/translation applies only to fragment, rotation still good for motif but translation vector is all fucked.
+                # Either recalculate translation vector or do a convoluted two-step process...
+                # 1. make motif and fragment into one prody object
+                # 2. map fragments and get rotation/translation
+                # 3. Apply rotation/translation to combined motif/fragment prody
+                # 4. map motifs and get rotation/translation
+                # 5. Apply rotation/translation to motif
+                # ... I'm just going to recalculate the translation vector, wtf am I doing.
+
+                # Get translation and rotation for fragment onto conformer
+                transformation_matrix = align.determine_rotation_and_translation()
+
+                # todo: calculate new translation vector for motif residue
+                # ASDFASDFASDF
+                t_vector_init = prody.calcCenter(motif_prody) - prody.calcCenter(prody.parsePDB(fragment_path))
+                t_vector_end = np.dot(transformation_matrix.getRotation(), t_vector_init)
+
+                # Apply translation and rotation to residue
+                transformed_fragment = prody.applyTransformation(transformation_matrix, prody.parsePDB(fragment_path))
+
+                # Write out (for now)
+                conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+                motif_residue_name = motif_filename[:-4]
+
+                # Debugging
+                print(transformation_matrix.getRotation())
+                print(t_vector_init)
+                print(t_vector_end)
+
+                transformation_matrix.setTranslation(t_vector_end)
+                transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
+
+                conformer_residues_path = os.path.join(self.user_defined_dir, 'Hypothetical_Binding_Sites', conformer_name)
+                os.makedirs(conformer_residues_path, exist_ok=True)
+                prody.writePDB(os.path.join(conformer_residues_path, ('-'.join([motif_residue_name, conformer_name]) + '.pdb')), transformed_motif)
+                prody.writePDB(os.path.join(conformer_residues_path, os.path.split(fragment_path)[1].split('.')[0] + '-transformed.pdb'), transformed_fragment)
+
+                # sys.exit()
 
 
     def score_residue_ligand_interactions(self, ligand_pdb):
@@ -248,9 +340,9 @@ class Generate_Binding_Sites():
                     # Output PDB
                     prody.writePDB(os.path.join(output_path, binding_site_description), complete_binding_site)
 
-    def generate_constraints(self):
+    def generate_constraints(self, binding_site_description, complete_binding_site):
         """
-        Generate a constraint file for a complete hypothetical binding site by concatinating previously generated
+        Generate a constraint file for a complete hypothetical binding site by concatenating previously generated
         residue-ligand constraints
         :return: 
         """

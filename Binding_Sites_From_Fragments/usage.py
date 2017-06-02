@@ -26,7 +26,8 @@ Usage:
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
     bsff generate_motifs <user_defined_dir> [options]
-    bsff bind <user_defined_dir> [options]
+    bsff prepare_motifs <user_defined_dir> [options]
+    bsff bind_by_hand <user_defined_dir> [options]
 
 Arguments:
     new
@@ -47,6 +48,9 @@ Arguments:
     generate_motifs
         Generate motif residues from clusters specified in Inputs/motif_clusters.yml
     
+    prepare_motifs
+        Prepare motifs for conformer binding site generation
+        
     bind_by_hand
         Generate hypothetical binding sites based on motif residues bins defined by the user
         
@@ -122,7 +126,7 @@ def main():
 
         # Fragment_1, Fragment_2, ...
         for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
-            fragment_pdb = os.path.join(working_directory, 'Inputs', 'User_Inputs')
+            fragment_pdb = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
             current_fragment = os.path.basename(fragment)
 
             # Create directory for processed PDBs
@@ -136,7 +140,7 @@ def main():
                 # Check if ligand is in exclusion list
                 if ligand not in exclude_ligand_list:
 
-                    prepare_ligand = Alignments(working_directory, current_fragment, ligand, processed_PDBs_path)
+                    prepare_ligand = Alignments(ligand, processed_PDBs_path)
 
                     # Each PDB containing a fragment-containing compound
                     for pdb in pdb_check(fcc):
@@ -179,7 +183,7 @@ def main():
                             # Continue if PDB has not been processed, rejected, or excluded by the user
                             else:
                                 # Mapping of fragment atoms to target ligand atoms
-                                align.fragment_path = os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))
+                                align.fragment_string = open(os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))).read()
                                 mapping_successful = align.fragment_target_mapping()
 
                                 if not mapping_successful:
@@ -218,8 +222,12 @@ def main():
     if args['generate_motifs']:
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
         # Generate motif residues for each ligand conformer
-        motifs = Generate_Motif_Residues(os.path.join(args['<user_defined_dir>'], 'Cluster_Results'), motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
         motifs.generate_motif_residues()
+
+    if args['prepare_motifs']:
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs.prepare_motifs_for_conformers()
 
     if args['bind_by_hand']:
         motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'r'))
