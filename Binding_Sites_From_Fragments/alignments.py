@@ -86,6 +86,8 @@ class Align_PDB(Alignments):
         self.pdb_file = pdb_file # Mobile PDB File to be aligned to a target
         self.target_string = target_string
         self.fragment_string = fragment_string
+        self.target_prody = None
+        self.fragment_prody = None
         self.lig_request_suffix = None
         self.ligand_chain = None
         self.ligand_ResSeq_ID = None
@@ -215,21 +217,22 @@ class Align_PDB(Alignments):
         frag_matches = fragment_mol.GetSubstructMatch(sub_mol)
         target_matches = target_mol.GetSubstructMatches(sub_mol)
 
+        # Fragment and target as prody atom objects
+        self.target_prody = prody.parsePDBStream(io.StringIO(self.target_string)).select('not hydrogen')
+        self.fragment_prody = prody.parsePDBStream(io.StringIO(self.fragment_string)).select('not hydrogen')
+
         # Maps fragment atom index to target atom index
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
         if len(target_matches) > 1:
-            fragment_target_mapping = self.identify_best_substructure(frag_matches, target_matches)
+            fragment_target_map = self.identify_best_substructure(frag_matches, target_matches)
             # fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
         else:
-            fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
+            fragment_target_map = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
         # Assign successful mappings to self
-        self.fragment_target_map = fragment_target_mapping
+        self.fragment_target_map = fragment_target_map
         self.target_mol_PDB_Block = target_mol_PDB_Block
-
-        # Debugging
-        print(self.fragment_target_map)
 
         return True
 
@@ -251,37 +254,33 @@ class Align_PDB(Alignments):
         """
         rmsd_dict = {}
         for match in target_matches:
-            fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, match)]
-            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_mapping)
+            fragment_target_map = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, match)]
+            frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_map)
             transformation_matrix = prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
             aligned_trgt = prody.applyTransformation(transformation_matrix, trgt_atom_coords)
 
-            rmsd_dict[prody.calcRMSD(frag_atom_coords, aligned_trgt)] = fragment_target_mapping
+            rmsd_dict[prody.calcRMSD(frag_atom_coords, aligned_trgt)] = fragment_target_map
 
         return rmsd_dict[min(rmsd_dict.keys())]
 
-    def process_atom_mappings_into_coordinate_sets(self, fragment_target_mapping):
-        # Fragment and target as prody atom objects (including Hydrogens)
-        target_prody_H = prody.parsePDBStream(io.StringIO(self.target_string))
-        fragment_prody_H = prody.parsePDBStream(io.StringIO(self.fragment_string))
-
-        # Debugging
-        print('trgt')
-        pprint.pprint([atom for atom in target_prody_H])
-        print('frag')
-        pprint.pprint([atom for atom in fragment_prody_H])
-
-        # Fragment and target prody selections (excluding hydrogens)
-        target_prody = target_prody_H.select('not hydrogen')
-        fragment_prody = fragment_prody_H.select('not hydrogen')
-
+    def process_atom_mappings_into_coordinate_sets(self, fragment_target_map):
         # Retrieve fragment and target atom indicies to align
-        fragment_atom_indices = [a[0] for a in fragment_target_mapping]
-        target_atom_indices = [a[1] for a in fragment_target_mapping]
+        fragment_atom_indices = [a[0] for a in fragment_target_map]
+        target_atom_indices = [a[1] for a in fragment_target_map]
 
         # Convert atom indicies into atom objects
-        frag_atom_selections = [fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
-        trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in target_atom_indices]
+        frag_atom_selections = [self.fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
+        trgt_atom_selections = [self.target_prody.select('index {}'.format(index)) for index in target_atom_indices]
+
+        # DEBUGGING - Export PDBs
+        os.makedirs(os.path.join('ONPF', 'Mapped_atoms'), exist_ok=True)
+        trgt_mapped_pdb = self.target_prody.select('index {}'.format(' '.join([str(a) for a in target_atom_indices])))
+        frag_mapped_pdb = self.fragment_prody.select('index {}'.format(' '.join([str(a) for a in fragment_atom_indices])))
+
+        prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-fragment.pdb'.format(self.pdb_file)), frag_mapped_pdb)
+        prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-target.pdb'.format(self.pdb_file)), trgt_mapped_pdb)
+
+        # print(prody.calcTransformation(frag_mapped_pdb, trgt_mapped_pdb).getMatrix())
 
         # Save atom names for mapped fragment atoms in target ligand
         self.target_fragment_atom_names = ' '.join([atom.getNames()[0] for atom in trgt_atom_selections if atom != None])
@@ -302,10 +301,6 @@ class Align_PDB(Alignments):
         """
         # todo: implement an option for RMSD cutoff where mapped atoms do not necessarily have the same conformations, e.g. sugar pucker
         frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
-
-        # Debugging
-        print(frag_atom_coords)
-        print(trgt_atom_coords)
 
         return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 

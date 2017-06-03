@@ -226,6 +226,7 @@ def main():
         motifs.generate_motif_residues()
 
     if args['prepare_motifs']:
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
         motifs.prepare_motifs_for_conformers()
 
