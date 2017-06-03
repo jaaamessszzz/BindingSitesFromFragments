@@ -147,6 +147,12 @@ class Generate_Motif_Residues():
         # I'm only going through upper triangle of matrix, but I'll record both (row, column) and (column, row)
         residue_residue_clash_dict = {}
 
+        # Precalculate transformation matrices for each fragment for each conformer
+        conformer_transformation_dict = {}
+
+        # Open fragment prodys and stick them in a dicitonary
+        fragment_prody_dict = {}
+
         # Fuckkkk
         # First need to do translation and rotation of all motif residues relative to fragments in new conformations
         motif_residue_dir = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
@@ -154,98 +160,98 @@ class Generate_Motif_Residues():
         # I derped designing the alignment classes so now this just exists. Hi.
         herp_derp = Alignments()
 
-        # For each conformer I want to determine motif clashes with...
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')):
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+            conformer_transformation_dict[conformer_name] = {}
 
-            # For each residue...
             for fragment in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')):
-
+                # todo: somehow define which atoms are absolutely rigid, flexible atoms mess up alignment
                 # Map fragment onto conformer
                 conformer_pdb_string = open(conformer).read()
                 fragment_pdb_string = open(fragment).read()
 
+                # Add fragment prody to fragment_prody_dict
+                fragment_name = os.path.basename(os.path.normpath(fragment)).split('.')[0]
+                fragment_prody_dict[fragment_name] = prody.parsePDB(fragment)
 
+                # Debugging
                 con_name = os.path.basename(os.path.normpath(conformer))
                 frag_name = os.path.basename(os.path.normpath(fragment))
 
-
+                # Determine transformation for fragment onto conformer
                 align = Align_PDB(herp_derp, pdb_file='{}_{}'.format(con_name, frag_name), target_string=conformer_pdb_string, fragment_string=fragment_pdb_string)
-
                 align.fragment_target_mapping()
 
-                print(conformer)
-                print(fragment)
-                print(align.fragment_target_map)
-
                 frag_atom_coords, trgt_atom_coords = align.process_atom_mappings_into_coordinate_sets(align.fragment_target_map)
-                rotation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+                transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+                conformer_transformation_dict[conformer_name][fragment_name] = transformation
 
-                os.makedirs(os.path.join(self.user_defined_dir, 'Conformer_Tests'), exist_ok=True)
-
-                transformed_fragment = prody.applyTransformation(qwer, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
-                prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
+                # Debugging
+                # os.makedirs(os.path.join(self.user_defined_dir, 'Conformer_Tests'), exist_ok=True)
+                # transformed_fragment = prody.applyTransformation(rotation, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
+                # prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
 
                 # Get rotation and translation matrix for aligning fragment onto correct atoms on conformer
                 # Determine correct translation for motif residue
                 # Apply rotation and translation to motif residue
 
-        # # For each conformer I want to determine motif clashes with...
-        # for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')):
-        #
-        #     # For each residue...
-        #     for motif_residue in pdb_check(motif_residue_dir):
-        #
-        #         # Parse file name to get fragment, import prody
-        #         motif_prody = prody.parsePDB(motif_residue)
-        #         motif_filename = os.path.basename(os.path.normpath(motif_residue))
-        #         motif_source_fragment = motif_filename.split('-')[2]
-        #
-        #         # Map fragment to conformer
-        #         # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
-        #         target = open(conformer).read()
-        #         mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
-        #         align = Align_PDB(herp_derp, motif_residue, mobile, target)
-        #         align.fragment_target_mapping()
-        #
-        #         # Fuck okay I messed up implementing this
-        #         # Rotation/translation applies only to fragment, rotation still good for motif but translation vector is all fucked.
-        #         # Either recalculate translation vector or do a convoluted two-step process...
-        #         # 1. make motif and fragment into one prody object
-        #         # 2. map fragments and get rotation/translation
-        #         # 3. Apply rotation/translation to combined motif/fragment prody
-        #         # 4. map motifs and get rotation/translation
-        #         # 5. Apply rotation/translation to motif
-        #         # ... I'm just going to recalculate the translation vector, wtf am I doing.
-        #
-        #         # Get translation and rotation for fragment onto conformer
-        #         transformation_matrix = align.determine_rotation_and_translation()
-        #
-        #         # todo: calculate new translation vector for motif residue
-        #         # ASDFASDFASDF
-        #         t_vector_init = prody.calcCenter(motif_prody) - prody.calcCenter(prody.parsePDB(fragment_path))
-        #         t_vector_end = np.dot(transformation_matrix.getRotation(), t_vector_init)
-        #
-        #         # Apply translation and rotation to residue
-        #         transformed_fragment = prody.applyTransformation(transformation_matrix, prody.parsePDB(fragment_path))
-        #
-        #         # Write out (for now)
-        #         conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
-        #         motif_residue_name = motif_filename[:-4]
-        #
-        #         # Debugging
-        #         print(transformation_matrix.getRotation())
-        #         print(t_vector_init)
-        #         print(t_vector_end)
-        #
-        #         transformation_matrix.setTranslation(t_vector_end)
-        #         transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
-        #
-        #         conformer_residues_path = os.path.join(self.user_defined_dir, 'Hypothetical_Binding_Sites', conformer_name)
-        #         os.makedirs(conformer_residues_path, exist_ok=True)
-        #         prody.writePDB(os.path.join(conformer_residues_path, ('-'.join([motif_residue_name, conformer_name]) + '.pdb')), transformed_motif)
-        #         prody.writePDB(os.path.join(conformer_residues_path, os.path.split(fragment_path)[1].split('.')[0] + '-transformed.pdb'), transformed_fragment)
-        #
-        #         # sys.exit()
+        # For each conformer I want to determine motif clashes with...
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')):
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+
+            # For each residue...
+            for motif_residue in pdb_check(motif_residue_dir):
+
+                # Parse file name to get fragment, import prody
+                motif_prody = prody.parsePDB(motif_residue)
+                motif_filename = os.path.basename(os.path.normpath(motif_residue))
+                motif_source_fragment = motif_filename.split('-')[2]
+
+                # Map fragment to conformer
+                # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
+                target = open(conformer).read()
+                mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
+                align = Align_PDB(herp_derp, motif_residue, mobile, target)
+                align.fragment_target_mapping()
+
+                # Fuck okay I messed up implementing this
+                # Rotation/translation applies only to fragment, rotation still good for motif but translation vector is all fucked.
+                # Either recalculate translation vector or do a convoluted two-step process...
+                # 1. make motif and fragment into one prody object
+                # 2. map fragments and get rotation/translation
+                # 3. Apply rotation/translation to combined motif/fragment prody
+                # 4. map motifs and get rotation/translation
+                # 5. Apply rotation/translation to motif
+                # ... I'm just going to recalculate the translation vector, wtf am I doing.
+
+                # Get translation and rotation for fragment onto conformer
+                transformation_matrix = conformer_transformation_dict[conformer_name][motif_source_fragment]
+
+                # todo: calculate new translation vector for motif residue
+                # t_vector_init = prody.calcCenter(motif_prody) - prody.calcCenter(fragment_prody_dict[motif_source_fragment])
+                # t_vector_end = np.dot(transformation_matrix.getRotation(), t_vector_init)
+
+                # Apply translation and rotation to residue
+                transformed_fragment = prody.applyTransformation(transformation_matrix, fragment_prody_dict[motif_source_fragment])
+
+                # Write out (for now)
+                # conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+                motif_residue_name = motif_filename.split('.')[0]
+                #
+                # # Debugging
+                # print(transformation_matrix.getRotation())
+                # print(t_vector_init)
+                # print(t_vector_end)
+
+                # transformation_matrix.setTranslation(t_vector_end)
+                transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
+
+                conformer_residues_path = os.path.join(self.user_defined_dir, 'Hypothetical_Binding_Sites', conformer_name)
+                os.makedirs(conformer_residues_path, exist_ok=True)
+                prody.writePDB(os.path.join(conformer_residues_path, ('-'.join([motif_residue_name, conformer_name]) + '.pdb')), transformed_motif)
+                prody.writePDB(os.path.join(conformer_residues_path, motif_source_fragment + '-transformed.pdb'), transformed_fragment)
+
+                # sys.exit()
 
 
     def score_residue_ligand_interactions(self, ligand_pdb):
