@@ -104,7 +104,7 @@ class Generate_Motif_Residues():
         # self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
         # self.generate_residue_residue_clash_matrix()
         # self.score_residue_ligand_interactions()
-        self.generate_residue_constraints()
+        self.generate_residue_ligand_constraints()
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
         """
@@ -333,7 +333,7 @@ class Generate_Motif_Residues():
                                header=1)
         pprint.pprint(score_df)
 
-    def generate_residue_constraints(self):
+    def generate_residue_ligand_constraints(self):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
 
@@ -355,6 +355,7 @@ class Generate_Motif_Residues():
             # Debugging - duplicate maps
             residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
             residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
+            ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in fragment_source_conformer.select('not hydrogen')}
 
             # I need to determine the closest atom-atom contacts and two additional atoms for determining bond torsions and angles
             # NOTE: Contact distance and indicies are for residue and ligand with hydrogens stripped!
@@ -366,6 +367,7 @@ class Generate_Motif_Residues():
             # Okay, now the hard part: selecting two additional atoms downstream from the contact atoms for meaningful constraints... programmatically...
             # Using RDKit to determine neighboring atoms, removes Hydrogens by default
 
+            # RESIDUE CONSTRAINT ATOM INDICES
             # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
             if residue_contact_atom.getNames()[0] in ['C', 'CA', 'CB', 'N', 'O']:
                 if residue_contact_atom.getNames()[0] == 'CB':
@@ -387,28 +389,32 @@ class Generate_Motif_Residues():
                     print('wut.')
                     raise Exception
 
-                print('FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
-                print('SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
-                print('THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
-
             else:
                 residue_second_atom = self._determine_next_residue_constraint_atom(residue_index_low, RD_residue, residue_prody)
                 residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
 
-                print('FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
-                print('SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
-                print('THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
+            print('RESIDUE - FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
+            print('RESIDUE - SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
+            print('RESIDUE - THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
 
-                # Debugging
-                print('\n\n')
-                print(residue)
+            # LIGAND CONSTRAINT ATOM INDICES
+            # So as far as choosing ligand constraints go, I think it's safe to chose whatever atoms as long as the
+            # terminal atom has >1 neighbor. The rationale being this will propogate atom selection torward less
+            # flexible parts of the ligand... hopefully...
 
-                print(contact_distace, residue_index_low, ligand_index_low)
-                print(residue_contact_atom.getNames())
-                print(ligand_contact_atom.getNames())
+            ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_index_low, RD_ligand, fragment_source_conformer)
 
-            # print(RD_residue.GetAtomWithIdx(int(residue_index_low)))
-            # print(RD_ligand.GetAtomWithIdx(int(ligand_index_low)))
+            print('LIGAND - FIRST ATOM: {} {}'.format(ligand_index_low, ligand_index_atom_map[ligand_index_low]))
+            print('LIGAND - SECOND ATOM: {} {}'.format(ligand_second_atom, ligand_index_atom_map[ligand_second_atom]))
+            print('LIGAND - THIRD ATOM: {} {}'.format(ligand_third_atom, ligand_index_atom_map[ligand_third_atom]))
+
+            # Debugging
+            print('\n\n')
+            print(residue)
+
+            print(contact_distace, residue_index_low, ligand_index_low)
+            print(residue_contact_atom.getNames())
+            print(ligand_contact_atom.getNames())
 
             # Get ideal distance, angle, and torsion values from prody residue
             # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values
@@ -447,16 +453,40 @@ class Generate_Motif_Residues():
                     next_atom_index = residue_atom_index_map[atom]
                     return next_atom_index
     
-    def _determine_next_ligand_constraint_atom(self, current_atom_index, RD_ligand, ligand_path):
+    def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_prody):
         """
-        Grabs the next ligand atom down the line for ligand constraint records
+        Grabs the next ligand atoms down the line for ligand constraint records
         :return: 
         """
-        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_path.select('not hydrogen')}
+        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_prody.select('not hydrogen')}
         pprint.pprint(ligand_index_atom_map)
 
-        
-        
+        ligand_contact_atom_neighbors = [atom for atom in RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
+
+        # Check all atoms that are adjacent to ligand contact atom
+        for second_atom in ligand_contact_atom_neighbors:
+
+            # Only investigate potential second constraint atoms with more than one neighbor
+            if len([atom.GetIdx() for atom in second_atom.GetNeighbors()]) > 1:
+                ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors()]
+                second_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in ligand_second_atom_neighbors])
+
+                # Check all atoms that are adjacent to the potential second constraint atom
+                for third_atom in ligand_second_atom_neighbors:
+                    third_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in third_atom.GetNeighbors()])
+                    common_two_three = third_atom_neighbors_set & second_atom_neighbors_set
+
+                    print(second_atom_neighbors_set)
+                    print(third_atom_neighbors_set)
+                    print(common_two_three)
+                    
+                    # Only investigate potential third constraint atoms with more than one neighbor, not including second atom
+                    if len(third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
+                        ligand_second_atom = second_atom.GetIdx()
+                        ligand_third_atom = third_atom.GetIdx()
+
+                        return ligand_second_atom, ligand_third_atom
+
     def define_second_shell_contraints(self):
         """
         Identify second shell contacts with motif residues
