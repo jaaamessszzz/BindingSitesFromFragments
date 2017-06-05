@@ -45,14 +45,22 @@ def processed_check(processed_dir, pdb, rejected_list):
     return any([in_reject_list, already_processed])
 
 
-def minimum_contact_distance(a, b, return_indices=False):
+def minimum_contact_distance(a_H, b_H, return_indices=False, strip_H=True):
     """
     Calculates the minimum distance between two sets of coordinates
-    :param a: coordinates of first set
-    :param b: coordinates of second set
+    :param a_H: prody object of first set (rows of dist matrix)
+    :param b_H: prody object of second set (columns of dist matrix)
     :param return_indices: boolean, whether or not to return row and column indicies of atoms with min distance in matrix
     :return: minimum distance in angstroms
     """
+
+    if strip_H:
+        a = a_H.select('not hydrogen').getCoords()
+        b = b_H.select('not hydrogen').getCoords()
+    else:
+        a = a_H.getCoords()
+        b = b_H.getCoords()
+
     ligand_residue_distance_matrix = prody.buildDistMatrix(a, b)
 
     # Find minimum score in matrix

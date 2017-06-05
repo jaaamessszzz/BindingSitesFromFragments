@@ -5,9 +5,9 @@ import sys
 import numpy as np
 import pandas as pd
 import prody
+from rdkit import Chem
 import pprint
 import yaml
-import json
 import re
 import itertools
 import subprocess
@@ -26,14 +26,13 @@ class Generate_Motif_Residues():
     def __init__(self, user_defined_dir, motif_cluster_yaml):
         self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
-        self.score_interactions_list_path = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', 'PDBs_to_score.txt')
-        self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
         self.residue_ligand_interactions_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions')
+        self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
+        self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
         # todo: accommodate C-term residues... could just add 1 to everything and say either or... sloppy though
         self.expected_atoms = {'ALA': 5, 'CYS': 6, 'ASP': 8, 'GLU': 9, 'PHE': 11, 'GLY': 4, 'HIS': 10, 'ILE': 8,
                                'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
                                'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12}
-
 
     def generate_motif_residues(self):
         """
@@ -96,7 +95,6 @@ class Generate_Motif_Residues():
 
                 motif_count += 1
 
-
     def prepare_motifs_for_conformers(self):
         """
         Prepare things for conformer binding site generation
@@ -104,8 +102,9 @@ class Generate_Motif_Residues():
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
         # self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
-        self.generate_residue_residue_clash_matrix()
-        self.score_residue_ligand_interactions()
+        # self.generate_residue_residue_clash_matrix()
+        # self.score_residue_ligand_interactions()
+        self.generate_residue_constraints()
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
         """
@@ -130,14 +129,13 @@ class Generate_Motif_Residues():
             clashing_residue_indices = []
             for motif_residue in pdb_check(motif_residue_dir):
                 residue_prody = prody.parsePDB(motif_residue).select('not hydrogen')
-                if minimum_contact_distance(residue_prody.getCoords(), target_molecule_prody.getCoords()) <= cutoff_distance:
+                if minimum_contact_distance(residue_prody, target_molecule_prody) <= cutoff_distance:
                     residue_index = os.path.basename(motif_residue).split('-')[0]
                     clashing_residue_indices.append(residue_index)
             residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
 
         yaml.dump(residue_ligand_clash_dict, open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
 
-    
     def transform_motif_residues_onto_fragments(self):
         """
         Exactly what is says!
@@ -190,8 +188,7 @@ class Generate_Motif_Residues():
                 # prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
                 
         return conformer_transformation_dict
-    
-    
+
     def generate_residue_residue_clash_matrix(self, clashing_cutoff=2):
         """
         Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
@@ -259,7 +256,7 @@ class Generate_Motif_Residues():
                     for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
                         outer_motif_index = outer_motif_tuple[0].split('-')[0]
                         inner_motif_index = inner_motif_tuple[0].split('-')[0]
-                        if minimum_contact_distance(outer_motif_tuple[1].getCoords(), inner_motif_tuple[1].getCoords()) < clashing_cutoff:
+                        if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
 
                             # If clashing, append tuples in both orders... look up times? Whatever!
                             if outer_motif_index != inner_motif_index:
@@ -269,7 +266,6 @@ class Generate_Motif_Residues():
                 residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
 
             yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
-
 
     def generate_residue_ligand_pdbs(self, conformer, motif_residue_list):
         """
@@ -299,7 +295,6 @@ class Generate_Motif_Residues():
             with open(self.score_interactions_list_path, 'a+') as pdb_list:
                 pdb_list.write('{}\n'.format(pdb_output_path))
 
-
     def score_residue_ligand_interactions(self):
         """
         Score each unique residue-ligand interaction with Rosetta and export to .csv (fa_atr, hbond_sc, fa_elec)
@@ -328,30 +323,140 @@ class Generate_Motif_Residues():
 
         score_df = pd.read_csv(scores_dir,
                                delim_whitespace=True,
-                               index_col=4,
-                               usecols=['hbond_sc', 'fa_rep', 'fa_elec', 'fa_atr', 'description'],
+                               index_col=3,
+                               usecols=['hbond_sc',
+                                        'fa_elec',
+                                        'fa_atr',
+                                        # 'fa_rep', # Commented out for now so I can just do a quick aggregate for total scores
+                                        'description'],
                                skiprows=0,
                                header=1)
         pprint.pprint(score_df)
 
-    def generate_constraint(self, binding_site_description, prody_binding_site):
+    def generate_residue_constraints(self):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
 
         :return: 
         """
+        fragment_source_conformer_path = os.path.join(self.user_defined_dir,
+                                                      'Inputs',
+                                                      'Fragment_Inputs',
+                                                      '{}_0001.pdb'.format(os.path.normpath(self.user_defined_dir))
+                                                      )
+        fragment_source_conformer = prody.parsePDB(fragment_source_conformer_path)
+
         # For residue in binding site
-        for residue in prody_binding_site:
-            pass
+        for residue in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')):
+            residue_prody = prody.parsePDB(residue)
+            RD_residue = Chem.MolFromPDBFile(residue)
+            RD_ligand = Chem.MolFromPDBFile(fragment_source_conformer_path)
+
+            # Debugging - duplicate maps
+            residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
+            residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
 
             # I need to determine the closest atom-atom contacts and two additional atoms for determining bond torsions and angles
+            # NOTE: Contact distance and indicies are for residue and ligand with hydrogens stripped!
+            contact_distace, residue_index_low, ligand_index_low= minimum_contact_distance(residue_prody, fragment_source_conformer, return_indices=True)
+
+            residue_contact_atom = residue_prody.select('index {}'.format(residue_index_low))
+            ligand_contact_atom = fragment_source_conformer.select('index {}'.format(ligand_index_low))
+
+            # Okay, now the hard part: selecting two additional atoms downstream from the contact atoms for meaningful constraints... programmatically...
+            # Using RDKit to determine neighboring atoms, removes Hydrogens by default
+
+            # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
+            if residue_contact_atom.getNames()[0] in ['C', 'CA', 'CB', 'N', 'O']:
+                if residue_contact_atom.getNames()[0] == 'CB':
+                    residue_second_atom = residue_atom_index_map['CA']
+                    residue_third_atom = residue_atom_index_map['C']
+                elif residue_contact_atom.getNames()[0] == 'O':
+                    residue_second_atom = residue_atom_index_map['C']
+                    residue_third_atom = residue_atom_index_map['CA']
+                elif residue_contact_atom.getNames()[0] == 'N':
+                    residue_second_atom = residue_atom_index_map['CA']
+                    residue_third_atom = residue_atom_index_map['C']
+                elif residue_contact_atom.getNames()[0] == 'C':
+                    residue_second_atom = residue_atom_index_map['CA']
+                    residue_third_atom = residue_atom_index_map['CB']
+                elif residue_contact_atom.getNames()[0] == 'CA':
+                    residue_second_atom = residue_atom_index_map['C']
+                    residue_third_atom = residue_atom_index_map['O']
+                else:
+                    print('wut.')
+                    raise Exception
+
+                print('FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
+                print('SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
+                print('THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
+
+            else:
+                residue_second_atom = self._determine_next_residue_constraint_atom(residue_index_low, RD_residue, residue_prody)
+                residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
+
+                print('FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
+                print('SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
+                print('THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
+
+                # Debugging
+                print('\n\n')
+                print(residue)
+
+                print(contact_distace, residue_index_low, ligand_index_low)
+                print(residue_contact_atom.getNames())
+                print(ligand_contact_atom.getNames())
+
+            # print(RD_residue.GetAtomWithIdx(int(residue_index_low)))
+            # print(RD_ligand.GetAtomWithIdx(int(ligand_index_low)))
+
             # Get ideal distance, angle, and torsion values from prody residue
             # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values
             # Set penalty to whatever since it isn't used by the matcher
             # Set distance to 0, otherwise periodicity (per) to 360
             # Set sample number so that samples are made every 5 degrees or every 0.1A
+    
+    def _determine_next_residue_constraint_atom(self, current_atom_index, RD_residue, residue_prody):
+        """
+        Grabs the next residue atom down the line for residue constraint records
+        :return: 
+        """
+        # Okay so I can't figure out for now how to retrieve atom names from RDKit atom objects,,,
+        # I'm going to create a dict mapping atom indices to atom names from the prody object
+        # Prody and RDKit both seem to derive atom indices in order of the PDB file
+        residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
+        residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
 
+        pprint.pprint(residue_index_atom_map)
+        
+        # Setting up hierarchy for residue atom selections - want selections to propagate toward main chain
+        # So.... Z>E>D>G>B>A
+        # Okay so starting at any given atom I should be able to determine connectivity and how many atoms out I am from CA
+        atom_hierarchy = ['H', 'Z', 'E', 'D', 'G', 'B', 'A']
 
+        residue_contact_atom_neighbors = [atom.GetIdx() for atom in RD_residue.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
+        if len(residue_contact_atom_neighbors) == 1:
+            next_atom_index = residue_contact_atom_neighbors[0]
+            return next_atom_index
+        
+        else:
+            first_atom_ID = residue_index_atom_map[current_atom_index]
+            second_atom_IDs = [residue_index_atom_map[atom] for atom in residue_contact_atom_neighbors]
+            for atom in second_atom_IDs:
+                if atom[1] == atom_hierarchy[atom_hierarchy.index(first_atom_ID[1]) + 1]:
+                    next_atom_index = residue_atom_index_map[atom]
+                    return next_atom_index
+    
+    def _determine_next_ligand_constraint_atom(self, current_atom_index, RD_ligand, ligand_path):
+        """
+        Grabs the next ligand atom down the line for ligand constraint records
+        :return: 
+        """
+        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_path.select('not hydrogen')}
+        pprint.pprint(ligand_index_atom_map)
+
+        
+        
     def define_second_shell_contraints(self):
         """
         Identify second shell contacts with motif residues
@@ -374,7 +479,6 @@ class Generate_Binding_Sites():
         self.residue_groups = residue_groups
         self.hypothetical_binding_sites = hypothetical_binding_sites
 
-
     def calculate_energies_and_rank(self):
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
@@ -383,7 +487,6 @@ class Generate_Binding_Sites():
         :return: 
         """
         pass
-
 
     def generate_binding_sites_by_hand(self):
         """
@@ -424,7 +527,7 @@ class Generate_Binding_Sites():
 
                 for outer_index, a in enumerate(binding_residue_list):
                     for inner_index, b in enumerate(binding_residue_list[(outer_index+1):]):
-                        if minimum_contact_distance(a.getCoords(), b.getCoords()) < cutoff_distance:
+                        if minimum_contact_distance(a, b) < cutoff_distance:
                             clashing = True
                             print('CLASHING!!!!~!!!!!!!!')
                             break
@@ -440,12 +543,12 @@ class Generate_Binding_Sites():
 
                     # Generate Constraints
                     binding_site_description = '{0}-{1}.pdb'.format(cluster_sum, '_'.join([str(a) for a in residue_combination]))
-                    self.generate_constraints(binding_site_description, complete_binding_site)
+                    self.generate_binding_site_constraints(binding_site_description, complete_binding_site)
 
                     # Output PDB
                     prody.writePDB(os.path.join(output_path, binding_site_description), complete_binding_site)
 
-    def generate_constraints(self, binding_site_description, complete_binding_site):
+    def generate_binding_site_constraints(self, binding_site_description, complete_binding_site):
         """
         Generate a constraint file for a complete hypothetical binding site by concatenating previously generated
         residue-ligand constraints
