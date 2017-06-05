@@ -28,6 +28,7 @@ Usage:
     bsff generate_motifs <user_defined_dir> [options]
     bsff prepare_motifs <user_defined_dir> [options]
     bsff bind_by_hand <user_defined_dir> [options]
+    bsff bind_everything <user_defined_dir> [options]
 
 Arguments:
     new
@@ -53,6 +54,9 @@ Arguments:
         
     bind_by_hand
         Generate hypothetical binding sites based on motif residues bins defined by the user
+    
+    bind_everything
+        EVERYTHING.
         
     <ligand>
         By default, this is the name of the target ligand. This can be changed
@@ -235,3 +239,7 @@ def main():
         hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'r'))
         bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
         bind.generate_binding_sites_by_hand()
+
+    if args['bind_everything']:
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind.bind_everything()

@@ -11,6 +11,7 @@ import yaml
 import re
 import itertools
 import subprocess
+import sqlite3
 from .alignments import Alignments, Align_PDB
 from .utils import *
 
@@ -101,9 +102,9 @@ class Generate_Motif_Residues():
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        # self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
-        # self.generate_residue_residue_clash_matrix()
-        # self.score_residue_ligand_interactions()
+        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
+        self.generate_residue_residue_clash_matrix()
+        self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints()
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
@@ -125,14 +126,15 @@ class Generate_Motif_Residues():
 
         target_molecule = os.path.normpath(self.user_defined_dir)
         for conformer in pdb_check(os.path.join(target_molecule, 'Inputs','Rosetta_Inputs')):
-            target_molecule_prody = prody.parsePDB(conformer).select('not hydrogen')
-            clashing_residue_indices = []
-            for motif_residue in pdb_check(motif_residue_dir):
-                residue_prody = prody.parsePDB(motif_residue).select('not hydrogen')
-                if minimum_contact_distance(residue_prody, target_molecule_prody) <= cutoff_distance:
-                    residue_index = os.path.basename(motif_residue).split('-')[0]
-                    clashing_residue_indices.append(residue_index)
-            residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
+            if os.path.basename(os.path.normpath(conformer)) != 'conf.lib.pdb':
+                target_molecule_prody = prody.parsePDB(conformer).select('not hydrogen')
+                clashing_residue_indices = []
+                for motif_residue in pdb_check(motif_residue_dir):
+                    residue_prody = prody.parsePDB(motif_residue).select('not hydrogen')
+                    if minimum_contact_distance(residue_prody, target_molecule_prody) <= cutoff_distance:
+                        residue_index = os.path.basename(motif_residue).split('-')[0]
+                        clashing_residue_indices.append(residue_index)
+                residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
 
         yaml.dump(residue_ligand_clash_dict, open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
 
@@ -303,7 +305,7 @@ class Generate_Motif_Residues():
         """
         # Calculate scores for all PDBs in this new directory (batch process, don't forget .params)
         current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
-        scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores.txt'.format(current_ligand))
+        scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
         run_jd2_score = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/score_jd2.macosclangrelease',
                                           '-l',
                                           self.score_interactions_list_path,
@@ -319,7 +321,7 @@ class Generate_Motif_Residues():
         run_jd2_score.wait()
 
         # Process score file into a .csv that can be imported by numpy as a matrix
-        print('Score file outputted as {}!'.format(scores_dir))
+        print('Raw score file outputted as {}!'.format(scores_dir))
 
         score_df = pd.read_csv(scores_dir,
                                delim_whitespace=True,
@@ -331,8 +333,14 @@ class Generate_Motif_Residues():
                                         'description'],
                                skiprows=0,
                                header=1)
+
+        # Debugging
         pprint.pprint(score_df)
 
+        # Output only necessary scores to a .csv
+        score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
+
+    # todo: ask Tanja what acceptable default tolerance values are
     def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10, angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10, torsion_B_tolerance_d=10):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
@@ -403,6 +411,7 @@ class Generate_Motif_Residues():
             # terminal atom has >1 neighbor. The rationale being this will propogate atom selection torward less
             # flexible parts of the ligand... hopefully...
 
+            # todo: check that third constraint atom is closer to ligand centroid than first? Eh.
             ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_index_low, RD_ligand, fragment_source_conformer)
 
             print('LIGAND - FIRST ATOM: {} {}'.format(ligand_index_low, ligand_index_atom_map[ligand_index_low]))
@@ -510,6 +519,7 @@ class Generate_Motif_Residues():
                                                      fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
                                                       ) for motif in cluster_residue_prody_list]
                 torsion_B_tolerance = np.std(torsion_B_list)
+
             else:
                 distance_tolerance = distance_tolerance_d
                 angle_A_tolerance = angle_A_tolerance_d
@@ -518,6 +528,7 @@ class Generate_Motif_Residues():
                 torsion_AB_tolerance = torsion_AB_tolerance_d
                 torsion_B_tolerance = torsion_B_tolerance_d
 
+            # todo: set upper bounds on tolerances...
             # Set penalty to whatever since it isn't used by the matcher
             # Set distance to 0, otherwise periodicity (per) to 360
             # Set sample number so that samples are made every 5 degrees or every 0.1A
@@ -549,7 +560,7 @@ class Generate_Motif_Residues():
             single_constraint_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints')
             os.makedirs(single_constraint_path, exist_ok=True)
 
-            with open(os.path.join(single_constraint_path, '{}_{}.cst'.format(residue_index, resname)), 'w') as constraint_file:
+            with open(os.path.join(single_constraint_path, '{}.cst'.format(residue_index)), 'w') as constraint_file:
                 constraint_file.write('\n'.join(constraint_block))
 
     def _determine_next_residue_constraint_atom(self, current_atom_index, RD_residue, residue_prody):
@@ -630,7 +641,7 @@ class Generate_Binding_Sites():
     User input required to deal with residues that obviously do not get along with other motif residues or the ligand
     e.g. steric clashing, non-favorable interactions
     """
-    def __init__(self, user_defined_dir, residue_groups, hypothetical_binding_sites):
+    def __init__(self, user_defined_dir, residue_groups=None, hypothetical_binding_sites=None):
         self.user_defined_dir = user_defined_dir
         self.residue_groups = residue_groups
         self.hypothetical_binding_sites = hypothetical_binding_sites
@@ -640,9 +651,102 @@ class Generate_Binding_Sites():
         Calculate total binding site interaction energies for all possible conformations of representative binding 
         motifs and rank.
         
+        Probs a good idea to use a SQLite3 DB for keeping track of all scores and binding site combintations generated
+        
         :return: 
         """
-        pass
+        # Retrieve list of Residue-Residue and Residue-Ligand Clashes
+        residue_ligand_clash_dict = yaml.load(open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'r'))
+        residue_residue_clash_dict = yaml.load(open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'r'))
+
+        # Import Rosetta Score df
+        current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
+        score_df = pd.read_csv(os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', '{}_scores_df.csv'.format(current_ligand)), index_col='description')
+
+        # Set up agg score dict (in the lamest fashion possible)
+        score_agg_dict = {}
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), base_only=True):
+            if conformer != 'conf.lib.pdb':
+                score_agg_dict[conformer.split('.')[0]] = {}
+
+        for index, row in score_df.iterrows():
+            current_conformer = index.split('-')[0]
+            motif_res_index = re.split('-|_', index)[2]
+            score_agg_dict[current_conformer][motif_res_index] = row.agg('sum')
+
+        # Generate SQLite DB
+        sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
+
+        # List of residue indicies
+        rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
+        representative_motif_residue_indices = [motif.split('-')[0] for motif in pdb_check(rep_motif_path, base_only=True)]
+
+        # For every conformer I've generated
+        for conformer, residue_list in residue_residue_clash_dict.items():
+
+            # Get rid of any residues that clash with the ligand straight away
+            useable_residues = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
+
+            # Generate all XXX choose 4 binding site configurations
+            list_of_residue_combinations = itertools.combinations(useable_residues, 4)
+
+            # For each combination of four residues...
+            for combo in list_of_residue_combinations:
+                # For each pair or residues, check if tuple is in residue_residue_clash_dict
+                fail_residue_combo = any([(pair in residue_list) for pair in itertools.combinations(combo, 2)])
+
+                # If there are no clashes, calculate Rosetta score (sum(fa_atr, fa_elec, hbond_sc))
+                if not fail_residue_combo:
+                    total_score = sum([score_agg_dict[conformer][res] for res in combo])
+
+                    # Push to SQLite DB table
+                    sorted_combo = sorted(combo)
+                    print('Inserting \t{}\t{}\t{}\t{}\t{}\t{} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
+                    sqlite_cusor.execute("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)", (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+
+            sqlite_connection.commit()
+
+        table = pd.read_sql_query("SELECT * from binding_motif_scores", sqlite_connection)
+        table.to_csv("ASDF" + '.csv', index_label='index')
+        sqlite_connection.close()
+
+        self.generate_all_the_sites()
+
+    def _generate_sqlite_db(self):
+        """
+        Generate SQLite database + table for storing binding site scores
+        :return: 
+        """
+        db_path = os.path.join(self.user_defined_dir, 'Inputs', 'Scored_Binding_Motifs.db')
+        db_existed = os.path.exists(db_path)
+        connection = sqlite3.connect(db_path)
+        cur = connection.cursor()
+
+        if not db_existed:
+            cur.execute("create table binding_motif_scores (conformer TEXT NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))")
+
+        return connection, cur
+
+    def generate_all_the_sites(self, score_cutoff= -15):
+        """
+        Generate constraint files (and optionally binding site PDBs) for binding sites that pass score filters
+        :return: 
+        """
+        sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
+        sqlite_cusor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
+
+        for row in sqlite_cusor.fetchall():
+            row_conformer = row[0]
+            row_motif_indicies = row[1:-1]
+            row_score = row[5]
+
+            complete_constraints_path = os.path.join(self.user_defined_dir, 'Complete_Matcher_Constraints')
+            os.makedirs(complete_constraints_path, exist_ok=True)
+
+            motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
+
+            with open(os.path.join(complete_constraints_path, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
+                complete_constraint_file.write('\n'.join(motif_constraint_block_list))
 
     def generate_binding_sites_by_hand(self):
         """
@@ -711,3 +815,11 @@ class Generate_Binding_Sites():
         :return: 
         """
         pass
+
+    def bind_everything(self):
+        """
+        BIND EVERYTHING
+        :return: 
+        """
+        self.calculate_energies_and_rank()
+        self.generate_all_the_sites()
