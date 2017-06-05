@@ -89,7 +89,7 @@ class Generate_Motif_Residues():
                         representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
 
                         # Output residue
-                        prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif-{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
+                        prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif_{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
                                        representative_residue)
                         total_motif_count += 1
 
@@ -333,10 +333,11 @@ class Generate_Motif_Residues():
                                header=1)
         pprint.pprint(score_df)
 
-    def generate_residue_ligand_constraints(self):
+    def generate_residue_ligand_constraints(self, distance_tolerance=0.5, angle_A_tolerance=10, angle_B_tolerance=10, torsion_A_tolerance=10, torsion_AB_tolerance=10, torsion_B_tolerance=10):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
-
+        res1 = residue
+        res2 = ligand
         :return: 
         """
         fragment_source_conformer_path = os.path.join(self.user_defined_dir,
@@ -416,8 +417,99 @@ class Generate_Motif_Residues():
             print(residue_contact_atom.getNames())
             print(ligand_contact_atom.getNames())
 
-            # Get ideal distance, angle, and torsion values from prody residue
-            # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values
+            # Import residues from clusters
+            residue_split = re.split('-|\.', residue)
+            fragment = residue_split[2]
+            cluster = residue_split[3]
+            resname = residue_split[5]
+
+            cluster_residue_prody_list = []
+            fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results', fragment)
+
+            for cluster_residue in pdb_check(fragment_cluster_path, base_only=True):
+                if cluster_residue.split('-')[0] == cluster:
+                    cluster_residue_prody = prody.parsePDB(os.path.join(fragment_cluster_path, cluster_residue))
+                    if cluster_residue_prody.getResnames()[0] == resname:
+                        cluster_residue_prody_list.append(cluster_residue_prody)
+
+            #########################################################################################
+            # Get ideal distance, angle, and torsion values from representative motif residue prody #
+            #########################################################################################
+
+            ideal_distance = contact_distace
+            ideal_angle_A = prody.calcAngle(residue_prody.select('index {}'.format(residue_second_atom)),
+                                            residue_prody.select('index {}'.format(residue_index_low)),
+                                            fragment_source_conformer.select('index {}'.format(ligand_index_low))
+                                            )
+            ideal_angle_B = prody.calcAngle(residue_prody.select('index {}'.format(residue_index_low)),
+                                            fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                            fragment_source_conformer.select('index {}'.format(ligand_second_atom))
+                                            )
+            ideal_torsion_A = prody.calcDihedral(residue_prody.select('index {}'.format(residue_third_atom)),
+                                                 residue_prody.select('index {}'.format(residue_second_atom)),
+                                                 residue_prody.select('index {}'.format(residue_index_low)),
+                                                 fragment_source_conformer.select('index {}'.format(ligand_index_low))
+                                                 )
+            ideal_torsion_AB = prody.calcDihedral(residue_prody.select('index {}'.format(residue_second_atom)),
+                                                  residue_prody.select('index {}'.format(residue_index_low)),
+                                                  fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                  fragment_source_conformer.select(
+                                                      'index {}'.format(ligand_second_atom))
+                                                  )
+            ideal_torsion_B = prody.calcDihedral(residue_prody.select('index {}'.format(residue_index_low)),
+                                                 fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                 fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                 fragment_source_conformer.select('index {}'.format(ligand_third_atom))
+                                                 )
+
+            #################################################################################################
+            # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values #
+            #################################################################################################
+
+            if len(cluster_residue_prody_list) > 3:
+                distance_list = [prody.calcDistance(fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                    motif.select('index {}'.format(residue_index_low)))
+                                 for motif in cluster_residue_prody_list]
+                distance_tolerance = np.std(distance_list)
+
+                # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+                angle_A_list = [prody.calcAngle(motif.select('index {}'.format(residue_second_atom)),
+                                                motif.select('index {}'.format(residue_index_low)),
+                                                fragment_source_conformer.select('index {}'.format(ligand_index_low)))
+                                for motif in cluster_residue_prody_list]
+                angle_A_tolerance = np.std(angle_A_list)
+
+                # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+                angle_B_list = [prody.calcAngle(motif.select('index {}'.format(residue_index_low)),
+                                                fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                fragment_source_conformer.select('index {}'.format(ligand_second_atom)))
+                                for motif in cluster_residue_prody_list]
+                angle_B_tolerance = np.std(angle_B_list)
+
+                # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+                torsion_A_list = [prody.calcDihedral(motif.select('index {}'.format(residue_third_atom)),
+                                                     motif.select('index {}'.format(residue_second_atom)),
+                                                     motif.select('index {}'.format(residue_index_low)),
+                                                     fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                     ) for motif in cluster_residue_prody_list]
+                torsion_A_tolerance = np.std(torsion_A_list)
+
+                # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+                torsion_AB_list = [prody.calcDihedral(motif.select('index {}'.format(residue_second_atom)),
+                                                     motif.select('index {}'.format(residue_index_low)),
+                                                      fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                      fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                     ) for motif in cluster_residue_prody_list]
+                torsion_AB_tolerance = np.std(torsion_AB_list)
+
+                # 'torsion_B' is the dihedral Res1:Atom1 - Res2:Atom1 - Res2:Atom2 - Res2:Atom3
+                torsion_B_list = [prody.calcDihedral(motif.select('index {}'.format(residue_index_low)),
+                                                     fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                     fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                     fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
+                                                      ) for motif in cluster_residue_prody_list]
+                torsion_B_tolerance = np.std(torsion_B_list)
+
             # Set penalty to whatever since it isn't used by the matcher
             # Set distance to 0, otherwise periodicity (per) to 360
             # Set sample number so that samples are made every 5 degrees or every 0.1A
@@ -476,10 +568,6 @@ class Generate_Motif_Residues():
                     third_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in third_atom.GetNeighbors()])
                     common_two_three = third_atom_neighbors_set & second_atom_neighbors_set
 
-                    print(second_atom_neighbors_set)
-                    print(third_atom_neighbors_set)
-                    print(common_two_three)
-                    
                     # Only investigate potential third constraint atoms with more than one neighbor, not including second atom
                     if len(third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
                         ligand_second_atom = second_atom.GetIdx()
