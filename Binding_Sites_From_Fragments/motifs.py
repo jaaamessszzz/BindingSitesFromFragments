@@ -333,7 +333,7 @@ class Generate_Motif_Residues():
                                header=1)
         pprint.pprint(score_df)
 
-    def generate_residue_ligand_constraints(self, distance_tolerance=0.5, angle_A_tolerance=10, angle_B_tolerance=10, torsion_A_tolerance=10, torsion_AB_tolerance=10, torsion_B_tolerance=10):
+    def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10, angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10, torsion_B_tolerance_d=10):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
         res1 = residue
@@ -418,7 +418,8 @@ class Generate_Motif_Residues():
             print(ligand_contact_atom.getNames())
 
             # Import residues from clusters
-            residue_split = re.split('-|\.', residue)
+            residue_split = re.split('-|\.', os.path.basename(os.path.normpath(residue)))
+            residue_index = residue_split[0]
             fragment = residue_split[2]
             cluster = residue_split[3]
             resname = residue_split[5]
@@ -436,7 +437,7 @@ class Generate_Motif_Residues():
             # Get ideal distance, angle, and torsion values from representative motif residue prody #
             #########################################################################################
 
-            ideal_distance = contact_distace
+            ideal_distance = float(contact_distace)
             ideal_angle_A = prody.calcAngle(residue_prody.select('index {}'.format(residue_second_atom)),
                                             residue_prody.select('index {}'.format(residue_index_low)),
                                             fragment_source_conformer.select('index {}'.format(ligand_index_low))
@@ -509,11 +510,48 @@ class Generate_Motif_Residues():
                                                      fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
                                                       ) for motif in cluster_residue_prody_list]
                 torsion_B_tolerance = np.std(torsion_B_list)
+            else:
+                distance_tolerance = distance_tolerance_d
+                angle_A_tolerance = angle_A_tolerance_d
+                angle_B_tolerance = angle_B_tolerance_d
+                torsion_A_tolerance = torsion_A_tolerance_d
+                torsion_AB_tolerance = torsion_AB_tolerance_d
+                torsion_B_tolerance = torsion_B_tolerance_d
 
             # Set penalty to whatever since it isn't used by the matcher
             # Set distance to 0, otherwise periodicity (per) to 360
             # Set sample number so that samples are made every 5 degrees or every 0.1A
-    
+
+            residue_resname = residue_prody.getResnames()[0]
+            ligand_resname = fragment_source_conformer.getResnames()[0]
+
+            constraint_block = ['CST::BEGIN',
+                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(residue_prody.select('index {}'.format(residue_index_low)).getNames()[0],
+                                                                                        residue_prody.select('index {}'.format(residue_second_atom)).getNames()[0],
+                                                                                        residue_prody.select('index {}'.format(residue_third_atom)).getNames()[0]
+                                                                                        ),
+                                '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(residue_resname),
+                                '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_index_low)).getNames()[0],
+                                                                                        fragment_source_conformer.select('index {}'.format(ligand_second_atom)).getNames()[0],
+                                                                                        fragment_source_conformer.select('index {}'.format(ligand_third_atom)).getNames()[0]
+                                                                                        ),
+                                '  TEMPLATE::   ATOM_MAP: 2 residue3: {}\n'.format(ligand_resname),
+                                '  CONSTRAINT:: distanceAB:  {0:7.2f} {1:6.2f} {2:6.2f}       0  {3:6}'.format(ideal_distance, distance_tolerance, 100, int((distance_tolerance * 2)/0.1)),
+                                '  CONSTRAINT::    angle_A:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_angle_A), angle_A_tolerance, 100, int((angle_A_tolerance * 2)/5)),
+                                '  CONSTRAINT::    angle_B:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_angle_B), angle_B_tolerance, 100, int((angle_B_tolerance * 2)/5)),
+                                '  CONSTRAINT::  torsion_A:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_A), torsion_A_tolerance, 100, int((torsion_A_tolerance * 2)/5)),
+                                '  CONSTRAINT::  torsion_B:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_B), torsion_B_tolerance, 100, int((torsion_B_tolerance * 2)/5)),
+                                '  CONSTRAINT:: torsion_AB:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, int((torsion_AB_tolerance * 2)/5)),
+                                'CST::END']
+
+            print('\n'.join(constraint_block))
+
+            single_constraint_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints')
+            os.makedirs(single_constraint_path, exist_ok=True)
+
+            with open(os.path.join(single_constraint_path, '{}_{}.cst'.format(residue_index, resname)), 'w') as constraint_file:
+                constraint_file.write('\n'.join(constraint_block))
+
     def _determine_next_residue_constraint_atom(self, current_atom_index, RD_residue, residue_prody):
         """
         Grabs the next residue atom down the line for residue constraint records
