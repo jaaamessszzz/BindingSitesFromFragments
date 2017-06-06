@@ -447,29 +447,32 @@ class Generate_Motif_Residues():
             #########################################################################################
 
             ideal_distance = float(contact_distace)
-            ideal_angle_A = prody.calcAngle(residue_prody.select('index {}'.format(residue_second_atom)),
-                                            residue_prody.select('index {}'.format(residue_index_low)),
-                                            fragment_source_conformer.select('index {}'.format(ligand_index_low))
-                                            )
-            ideal_angle_B = prody.calcAngle(residue_prody.select('index {}'.format(residue_index_low)),
+            # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+            ideal_angle_A = prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
                                             fragment_source_conformer.select('index {}'.format(ligand_index_low)),
-                                            fragment_source_conformer.select('index {}'.format(ligand_second_atom))
+                                            residue_prody.select('index {}'.format(residue_index_low))
                                             )
-            ideal_torsion_A = prody.calcDihedral(residue_prody.select('index {}'.format(residue_third_atom)),
-                                                 residue_prody.select('index {}'.format(residue_second_atom)),
-                                                 residue_prody.select('index {}'.format(residue_index_low)),
-                                                 fragment_source_conformer.select('index {}'.format(ligand_index_low))
-                                                 )
-            ideal_torsion_AB = prody.calcDihedral(residue_prody.select('index {}'.format(residue_second_atom)),
-                                                  residue_prody.select('index {}'.format(residue_index_low)),
-                                                  fragment_source_conformer.select('index {}'.format(ligand_index_low)),
-                                                  fragment_source_conformer.select(
-                                                      'index {}'.format(ligand_second_atom))
-                                                  )
-            ideal_torsion_B = prody.calcDihedral(residue_prody.select('index {}'.format(residue_index_low)),
-                                                 fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+            # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+            ideal_angle_B = prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                            residue_prody.select('index {}'.format(residue_index_low)),
+                                            residue_prody.select('index {}'.format(residue_second_atom))
+                                            )
+            # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+            ideal_torsion_A = prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
                                                  fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                                 fragment_source_conformer.select('index {}'.format(ligand_third_atom))
+                                                 fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                 residue_prody.select('index {}'.format(residue_index_low))
+                                                 )
+            # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+            ideal_torsion_AB = prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                  fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                  residue_prody.select('index {}'.format(residue_index_low)),
+                                                  residue_prody.select('index {}'.format(residue_second_atom))
+                                                  )
+            ideal_torsion_B = prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                 residue_prody.select('index {}'.format(residue_index_low)),
+                                                 residue_prody.select('index {}'.format(residue_second_atom)),
+                                                 residue_prody.select('index {}'.format(residue_third_atom))
                                                  )
 
             #################################################################################################
@@ -483,40 +486,40 @@ class Generate_Motif_Residues():
                 distance_tolerance = np.std(distance_list)
 
                 # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                angle_A_list = [prody.calcAngle(motif.select('index {}'.format(residue_second_atom)),
-                                                motif.select('index {}'.format(residue_index_low)),
-                                                fragment_source_conformer.select('index {}'.format(ligand_index_low)))
+                angle_A_list = [prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                motif.select('index {}'.format(residue_index_low)))
                                 for motif in cluster_residue_prody_list]
                 angle_A_tolerance = np.std(angle_A_list)
 
                 # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                angle_B_list = [prody.calcAngle(motif.select('index {}'.format(residue_index_low)),
-                                                fragment_source_conformer.select('index {}'.format(ligand_index_low)),
-                                                fragment_source_conformer.select('index {}'.format(ligand_second_atom)))
+                angle_B_list = [prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                motif.select('index {}'.format(residue_index_low)),
+                                                motif.select('index {}'.format(residue_second_atom)))
                                 for motif in cluster_residue_prody_list]
                 angle_B_tolerance = np.std(angle_B_list)
 
                 # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                torsion_A_list = [prody.calcDihedral(motif.select('index {}'.format(residue_third_atom)),
-                                                     motif.select('index {}'.format(residue_second_atom)),
-                                                     motif.select('index {}'.format(residue_index_low)),
+                torsion_A_list = [prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
+                                                     fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
                                                      fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                     motif.select('index {}'.format(residue_index_low)),
                                                      ) for motif in cluster_residue_prody_list]
                 torsion_A_tolerance = np.std(torsion_A_list)
 
                 # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                torsion_AB_list = [prody.calcDihedral(motif.select('index {}'.format(residue_second_atom)),
-                                                     motif.select('index {}'.format(residue_index_low)),
+                torsion_AB_list = [prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
                                                       fragment_source_conformer.select('index {}'.format(ligand_index_low)),
-                                                      fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
+                                                      motif.select('index {}'.format(residue_index_low)),
+                                                      motif.select('index {}'.format(residue_second_atom)),
                                                      ) for motif in cluster_residue_prody_list]
                 torsion_AB_tolerance = np.std(torsion_AB_list)
 
                 # 'torsion_B' is the dihedral Res1:Atom1 - Res2:Atom1 - Res2:Atom2 - Res2:Atom3
-                torsion_B_list = [prody.calcDihedral(motif.select('index {}'.format(residue_index_low)),
-                                                     fragment_source_conformer.select('index {}'.format(ligand_index_low)),
-                                                     fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                                     fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
+                torsion_B_list = [prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_index_low)),
+                                                     motif.select('index {}'.format(residue_index_low)),
+                                                     motif.select('index {}'.format(residue_second_atom)),
+                                                     motif.select('index {}'.format(residue_third_atom)),
                                                       ) for motif in cluster_residue_prody_list]
                 torsion_B_tolerance = np.std(torsion_B_list)
 
@@ -537,22 +540,22 @@ class Generate_Motif_Residues():
             ligand_resname = fragment_source_conformer.getResnames()[0]
 
             constraint_block = ['CST::BEGIN',
-                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(residue_prody.select('index {}'.format(residue_index_low)).getNames()[0],
-                                                                                        residue_prody.select('index {}'.format(residue_second_atom)).getNames()[0],
-                                                                                        residue_prody.select('index {}'.format(residue_third_atom)).getNames()[0]
-                                                                                        ),
-                                '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(residue_resname),
-                                '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_index_low)).getNames()[0],
+                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_index_low)).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_second_atom)).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_third_atom)).getNames()[0]
                                                                                         ),
-                                '  TEMPLATE::   ATOM_MAP: 2 residue3: {}\n'.format(ligand_resname),
-                                '  CONSTRAINT:: distanceAB:  {0:7.2f} {1:6.2f} {2:6.2f}       0  {3:6}'.format(ideal_distance, distance_tolerance, 100, int((distance_tolerance * 2)/0.1)),
-                                '  CONSTRAINT::    angle_A:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_angle_A), angle_A_tolerance, 100, int((angle_A_tolerance * 2)/5)),
-                                '  CONSTRAINT::    angle_B:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_angle_B), angle_B_tolerance, 100, int((angle_B_tolerance * 2)/5)),
-                                '  CONSTRAINT::  torsion_A:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_A), torsion_A_tolerance, 100, int((torsion_A_tolerance * 2)/5)),
-                                '  CONSTRAINT::  torsion_B:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_B), torsion_B_tolerance, 100, int((torsion_B_tolerance * 2)/5)),
-                                '  CONSTRAINT:: torsion_AB:  {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:6}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, int((torsion_AB_tolerance * 2)/5)),
+                                '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(ligand_resname),
+                                '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(residue_prody.select('index {}'.format(residue_index_low)).getNames()[0],
+                                                                                        residue_prody.select('index {}'.format(residue_second_atom)).getNames()[0],
+                                                                                        residue_prody.select('index {}'.format(residue_third_atom)).getNames()[0]
+                                                                                        ),
+                                '  TEMPLATE::   ATOM_MAP: 2 residue3: {}\n'.format(residue_resname),
+                                '  CONSTRAINT:: distanceAB: {0:7.2f} {1:6.2f} {2:6.2f}       0  {3:3}'.format(ideal_distance, distance_tolerance, 100, int((distance_tolerance * 2)/0.1)),
+                                '  CONSTRAINT::    angle_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_angle_A), angle_A_tolerance, 100, int((angle_A_tolerance * 2)/5)),
+                                '  CONSTRAINT::    angle_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_angle_B), angle_B_tolerance, 100, int((angle_B_tolerance * 2)/5)),
+                                '  CONSTRAINT::  torsion_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_A), torsion_A_tolerance, 100, int((torsion_A_tolerance * 2)/5)),
+                                '  CONSTRAINT::  torsion_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_B), torsion_B_tolerance, 100, int((torsion_B_tolerance * 2)/5)),
+                                '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, int((torsion_AB_tolerance * 2)/5)),
                                 'CST::END']
 
             print('\n'.join(constraint_block))
