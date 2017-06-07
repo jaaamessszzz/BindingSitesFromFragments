@@ -329,7 +329,7 @@ class Generate_Motif_Residues():
                                usecols=['hbond_sc',
                                         'fa_elec',
                                         'fa_atr',
-                                        # 'fa_rep', # Commented out for now so I can just do a quick aggregate for total scores
+                                        'fa_rep', # Commented out for now so I can just do a quick aggregate for total scores
                                         'description'],
                                skiprows=0,
                                header=1)
@@ -340,7 +340,6 @@ class Generate_Motif_Residues():
         # Output only necessary scores to a .csv
         score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
 
-    # todo: ask Tanja what acceptable default tolerance values are
     def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10, angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10, torsion_B_tolerance_d=10, torsion_constraint_sample_number=3, angle_constraint_sample_number=3, distance_constraint_sample_number=1):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
@@ -524,7 +523,7 @@ class Generate_Motif_Residues():
                 torsion_B_tolerance_SD = np.std(torsion_B_list)
 
                 # Set lower and upper bounds for tolerances
-                # distance_tolerance = 1 if distance_tolerance_SD > 1 else distance_tolerance_SD
+                distance_tolerance = 0.5 if distance_tolerance_SD > 0.5 else distance_tolerance_SD
                 angle_A_tolerance = (360 / (2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_A_tolerance_SD > 120 else angle_A_tolerance_SD
                 angle_B_tolerance = (360 / (2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_B_tolerance_SD > 120 else angle_B_tolerance_SD
                 torsion_A_tolerance = (360 / (2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_A_tolerance_SD > 120 else torsion_A_tolerance_SD
@@ -683,7 +682,37 @@ class Generate_Binding_Sites():
         for index, row in score_df.iterrows():
             current_conformer = index.split('-')[0]
             motif_res_index = re.split('-|_', index)[2]
-            score_agg_dict[current_conformer][motif_res_index] = row.agg('sum')
+
+            # Talaris2014 score term weights
+            # fa_atr 1
+            # fa_rep 0.55
+            # fa_sol 0.9375
+            # fa_intra_rep 0.005
+            # fa_elec 0.875
+            # pro_close 1.25
+            # hbond_sr_bb 1.17
+            # hbond_lr_bb 1.17
+            # hbond_bb_sc 1.17
+            # hbond_sc 1.1
+            # dslf_fa13 1.25
+            # rama 0.25
+            # omega 0.625
+            # fa_dun 0.7
+            # p_aa_pp 0.4
+            # yhh_planarity 0.625
+            # ref 1
+
+            talaris2014_weights = {'fa_atr' : 1,
+                                   'fa_elec': 0.875,
+                                   'hbond_sc': 1.1,
+                                   'fa_rep': 0.55
+                                   }
+
+            score_agg_dict[current_conformer][motif_res_index] = sum([row['fa_atr'] * talaris2014_weights['fa_atr'],
+                                                                      row['fa_elec'] * talaris2014_weights['fa_elec'],
+                                                                      row['hbond_sc'] * talaris2014_weights['hbond_sc'],
+                                                                      row['fa_rep'] * talaris2014_weights['fa_rep']
+                                                                      ])
 
         # Generate SQLite DB
         sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
@@ -710,10 +739,11 @@ class Generate_Binding_Sites():
                 if not fail_residue_combo:
                     total_score = sum([score_agg_dict[conformer][res] for res in combo])
 
-                    # Push to SQLite DB table
-                    sorted_combo = sorted(combo)
-                    print('Inserting \t{}\t{}\t{}\t{}\t{}\t{} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
-                    sqlite_cusor.execute("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)", (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+                    # Push to SQLite DB table if score is < 0
+                    if total_score < 0:
+                        sorted_combo = sorted(combo)
+                        print('Inserting {:10} {:3} {:3} {:3} {:3} {:7.3f} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
+                        sqlite_cusor.execute("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)", (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
             sqlite_connection.commit()
 
