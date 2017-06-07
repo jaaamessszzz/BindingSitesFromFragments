@@ -12,7 +12,7 @@ import re
 import itertools
 import subprocess
 import sqlite3
-from .alignments import Alignments, Align_PDB
+from .alignments import Align_PDB
 from .utils import *
 
 class Generate_Motif_Residues():
@@ -24,16 +24,17 @@ class Generate_Motif_Residues():
     2.  Residue-ligand interaction scores as calculated with Rosetta
     3.  Constraint file for each residue-ligand interaction
     """
+    # todo: accommodate C-term residues... could just add 1 to everything and say either or... sloppy though
+    expected_atoms = {'ALA': 5, 'CYS': 6, 'ASP': 8, 'GLU': 9, 'PHE': 11, 'GLY': 4, 'HIS': 10, 'ILE': 8,
+                      'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
+                      'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12}
+
     def __init__(self, user_defined_dir, motif_cluster_yaml):
         self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
         self.residue_ligand_interactions_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions')
         self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
         self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
-        # todo: accommodate C-term residues... could just add 1 to everything and say either or... sloppy though
-        self.expected_atoms = {'ALA': 5, 'CYS': 6, 'ASP': 8, 'GLU': 9, 'PHE': 11, 'GLY': 4, 'HIS': 10, 'ILE': 8,
-                               'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
-                               'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12}
 
     def generate_motif_residues(self):
         """
@@ -80,7 +81,7 @@ class Generate_Motif_Residues():
                 for res in residue_types:
                     # Calculate average residue coordinates
                     cluster_residues = [residue for residue in fragment_prody_dict[fragment][cluster]
-                                        if all([residue.getResnames()[0] == res, len(residue) == self.expected_atoms[residue.getResnames()[0]]])]
+                                        if all([residue.getResnames()[0] == res, len(residue) == expected_atoms[residue.getResnames()[0]]])]
 
                     if len(cluster_residues) > 0:
                         average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
@@ -150,9 +151,6 @@ class Generate_Motif_Residues():
         fragment_prody_dict = {}
 
         # First need to do translation and rotation of all motif residues relative to fragments in new conformations
-        
-        # I derped designing the alignment classes so now this just exists. Hi.
-        herp_derp = Alignments()
 
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')):
             conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
@@ -173,8 +171,7 @@ class Generate_Motif_Residues():
                 frag_name = os.path.basename(os.path.normpath(fragment))
 
                 # Determine transformation for fragment onto conformer
-                align = Align_PDB(herp_derp,
-                                  pdb_file='{}_{}'.format(con_name, frag_name),
+                align = Align_PDB(pdb_file='{}_{}'.format(con_name, frag_name),
                                   target_string=conformer_pdb_string,
                                   fragment_string=fragment_pdb_string)
                 align.fragment_target_mapping()
@@ -203,10 +200,7 @@ class Generate_Motif_Residues():
         """
         
         residue_residue_clash_dict = {}
-        
-        # I derped designing the alignment classes so now this just exists. Hi.
-        herp_derp = Alignments()
-        
+
         conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
         
         # touch text file to keep track of paths for PDBs to score
@@ -233,7 +227,7 @@ class Generate_Motif_Residues():
                     # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
                     target = open(conformer).read()
                     mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
-                    align = Align_PDB(herp_derp, motif_residue, mobile, target)
+                    align = Align_PDB(motif_residue, mobile, target)
                     align.fragment_target_mapping()
 
                     # Get translation and rotation for fragment onto conformer
@@ -751,7 +745,7 @@ class Generate_Binding_Sites():
         table.to_csv("ASDF" + '.csv', index_label='index')
         sqlite_connection.close()
 
-        self.generate_all_the_sites()
+        self.generate_binding_site_constraints()
 
     def _generate_sqlite_db(self):
         """
@@ -768,7 +762,7 @@ class Generate_Binding_Sites():
 
         return connection, cur
 
-    def generate_all_the_sites(self, score_cutoff= -15):
+    def generate_binding_site_constraints(self, score_cutoff=-15):
         """
         Generate constraint files (and optionally binding site PDBs) for binding sites that pass score filters
         :return: 
@@ -848,19 +842,3 @@ class Generate_Binding_Sites():
 
                     # Output PDB
                     prody.writePDB(os.path.join(output_path, binding_site_description), complete_binding_site)
-
-    def generate_binding_site_constraints(self, binding_site_description, complete_binding_site):
-        """
-        Generate a constraint file for a complete hypothetical binding site by concatenating previously generated
-        residue-ligand constraints
-        :return: 
-        """
-        pass
-
-    def bind_everything(self):
-        """
-        BIND EVERYTHING
-        :return: 
-        """
-        self.calculate_energies_and_rank()
-        self.generate_all_the_sites()

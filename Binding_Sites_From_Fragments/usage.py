@@ -29,6 +29,7 @@ Usage:
     bsff prepare_motifs <user_defined_dir> [options]
     bsff bind_by_hand <user_defined_dir> [options]
     bsff bind_everything <user_defined_dir> [options]
+    bsff generate_constraints <user_defined_dir> <score_cutoff>
 
 Arguments:
     new
@@ -57,7 +58,10 @@ Arguments:
     
     bind_everything
         EVERYTHING.
-        
+    
+    generate_constraints
+        Generate constraint files for all binding site conformations under a given score cutoff
+    
     <ligand>
         By default, this is the name of the target ligand. This can be changed
         using the [ligand_input_format] option
@@ -65,6 +69,10 @@ Arguments:
     <user_defined_dir>
         Directory defined by user containing PubChem search results
 
+    <score_cutoff>
+        Absolute value of dcore cutoff to use to generate constraint files. WILL BE CONVERTED TO NEGATIVE NUMBER,
+        it's a pain to enter negative numbers in the command line... :(
+        
 Options:
     -c --clusters <clusters>
         Set number of clusters
@@ -76,12 +84,13 @@ Options:
         Use a different input format for the ligand. [CID|name|smiles]
         
     -r --rosetta_scores
-        Calculate Rosetta score terms for unique residue-ligand interactions duoring the motif residue generation step
+        Calculate Rosetta score terms for unique residue-ligand interactions during the motif residue generation step
     
+    -s --score_cutoff_option <score_cutoff_option>
+        Score cutoff to use for generating constraint files
+        
     -w --weights <weights>
         Comma separated values for representative vector weights
-    
-    
 
 """
 import docopt
@@ -90,7 +99,7 @@ import sys
 import pprint
 import yaml
 from .fragments import Fragments
-from .alignments import Alignments, Align_PDB
+from .alignments import Fragment_Alignments
 from .clustering import Cluster
 from .motifs import Generate_Motif_Residues, Generate_Binding_Sites
 from .utils import *
@@ -144,7 +153,7 @@ def main():
                 # Check if ligand is in exclusion list
                 if ligand not in exclude_ligand_list:
 
-                    prepare_ligand = Alignments(ligand, processed_PDBs_path)
+                    align = Fragment_Alignments(ligand, processed_PDBs_path)
 
                     # Each PDB containing a fragment-containing compound
                     for pdb in pdb_check(fcc):
@@ -166,7 +175,7 @@ def main():
                             # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
                             # I can't believe how unorganized everything is, damn.
                             try:
-                                prepare_ligand.fetch_records()
+                                align.fetch_records()
 
                             except Exception as e:
                                 print('{}: {}'.format(pdbid,e))
@@ -174,7 +183,6 @@ def main():
                                     reject_list.write('{}\n'.format(pdbid))
                                 continue
 
-                            align = Align_PDB(prepare_ligand)
                             # Extract HETATM and CONECT records for the target ligand
                             # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
                             reject = align.fetch_specific_ligand_record(pdb)
@@ -242,4 +250,9 @@ def main():
 
     if args['bind_everything']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
-        bind.bind_everything()
+        bind.calculate_energies_and_rank()
+        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -15)
+
+    if args['generate_constraints']:
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']))

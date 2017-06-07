@@ -12,67 +12,9 @@ import time
 import numpy as np
 import pprint
 
-
-class Alignments():
+class Align_PDB():
     """
-    This base class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
-    fragments.
-    """
-
-    def __init__(self, ligand='DERP', processed_PDBs_path=None):
-        self.ligand = ligand.upper()
-        self.processed_PDBs_path = processed_PDBs_path
-        # Initialized later
-        self.ligexpo_list = None
-        self.ideal_ligand_pdb = None
-
-    def fetch_records(self):
-        """
-        Only download ligands from Ligand Expo if and when required...
-        """
-        self.ligexpo_list = self.fetch_ligand_records(self.ligand)
-        self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
-
-    def fetch_ideal_pdb(self, ligand):
-        """
-        Get the ideal pdb for the target ligand. This is used to check that all atoms are present in target ligands
-        extracted from bound proteins
-
-        :param ligand: Three letter code for the desired ligand (upper case!!)
-        :return: io.StringIO for pdb of ligand retrieved from LigandExpo
-        """
-        ideal_pdb_text = requests.get(
-            'http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand),
-            stream=False).text
-        return prody.parsePDBStream(io.StringIO(ideal_pdb_text))
-
-    def fetch_ligand_records(self, ligand):
-        """
-        Retrieves ligand records from LigandExpo
-
-        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
-        structure in the PDB using LigandExpo as outlined here:
-        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
-
-        This might be the way to go since it removes the need for all this parsing...
-
-        20170516: So I've found that free amino acids such as HIS are not retrievable using LigandExpo in this manner...
-        I'm going to need to find a solution for this. 
-
-        :param ligand: Three letter code for fragment-containing ligand
-        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
-        :return: List of all ligand HETATM records
-        """
-        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
-                                   stream=False)
-        soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
-
-        return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
-
-
-class Align_PDB(Alignments):
-    """
-    Subclass with functions for aligning individual PDBs
+    Base class with functions for aligning individual PDBs
     :param pdb_file: path to input PDB containing protein bound to fragment-containing target molecule (MOBILE)
     :param target_string: string of PDB for target ligand, fetched from LigandExpo (MOBILE)
     :param fragment_path: path to PDB of current fragment (TARGET)
@@ -81,8 +23,7 @@ class Align_PDB(Alignments):
     :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
     :param target_fragment_atom_names: names of atoms in target fragment
     """
-    def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_string=None):
-        self.__dict__ = Alignments.__dict__
+    def __init__(self, pdb_file=None, target_string=None, fragment_string=None):
         self.pdb_file = pdb_file # Mobile PDB File to be aligned to a target
         self.target_string = target_string
         self.fragment_string = fragment_string
@@ -230,6 +171,9 @@ class Align_PDB(Alignments):
         else:
             fragment_target_map = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
+        # todo: this is where I would insert a function to select rigid atoms from fragment map for alignments
+        # do that.
+
         # Assign successful mappings to self
         self.fragment_target_map = fragment_target_map
         self.target_mol_PDB_Block = target_mol_PDB_Block
@@ -273,12 +217,12 @@ class Align_PDB(Alignments):
         trgt_atom_selections = [self.target_prody.select('index {}'.format(index)) for index in target_atom_indices]
 
         # DEBUGGING - Export PDBs
-        os.makedirs(os.path.join('ONPF', 'Mapped_atoms'), exist_ok=True)
-        trgt_mapped_pdb = self.target_prody.select('index {}'.format(' '.join([str(a) for a in target_atom_indices])))
-        frag_mapped_pdb = self.fragment_prody.select('index {}'.format(' '.join([str(a) for a in fragment_atom_indices])))
-
-        prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-fragment.pdb'.format(self.pdb_file)), frag_mapped_pdb)
-        prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-target.pdb'.format(self.pdb_file)), trgt_mapped_pdb)
+        # os.makedirs(os.path.join('ONPF', 'Mapped_atoms'), exist_ok=True)
+        # trgt_mapped_pdb = self.target_prody.select('index {}'.format(' '.join([str(a) for a in target_atom_indices])))
+        # frag_mapped_pdb = self.fragment_prody.select('index {}'.format(' '.join([str(a) for a in fragment_atom_indices])))
+        #
+        # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-fragment.pdb'.format(self.pdb_file)), frag_mapped_pdb)
+        # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-target.pdb'.format(self.pdb_file)), trgt_mapped_pdb)
 
         # print(prody.calcTransformation(frag_mapped_pdb, trgt_mapped_pdb).getMatrix())
 
@@ -339,3 +283,70 @@ class Align_PDB(Alignments):
         prody.writePDB(os.path.join(self.processed_PDBs_path, '{}processed.pdb'.format(self.lig_request_suffix)), transformed_pdb)
 
         return transformed_pdb
+
+
+class Fragment_Alignments(Align_PDB):
+    """
+    This subclass class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
+    fragments.
+    """
+
+    def __init__(self, ligand='DERP', processed_PDBs_path=None, pdb_file=None, target_string=None, fragment_string=None):
+        Align_PDB.__init__(self, pdb_file=pdb_file, target_string=target_string, fragment_string=fragment_string)
+        self.ligand = ligand.upper()
+        self.processed_PDBs_path = processed_PDBs_path
+        # Initialized later
+        self.ligexpo_list = None
+        self.ideal_ligand_pdb = None
+
+    def fetch_records(self):
+        """
+        Only download ligands from Ligand Expo if and when required...
+        """
+        self.ligexpo_list = self.fetch_ligand_records(self.ligand)
+        self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
+
+    def fetch_ideal_pdb(self, ligand):
+        """
+        Get the ideal pdb for the target ligand. This is used to check that all atoms are present in target ligands
+        extracted from bound proteins
+
+        :param ligand: Three letter code for the desired ligand (upper case!!)
+        :return: io.StringIO for pdb of ligand retrieved from LigandExpo
+        """
+        ideal_pdb_text = requests.get(
+            'http://ligand-expo.rcsb.org/reports/{}/{}/{}_ideal.pdb'.format(ligand[0], ligand, ligand),
+            stream=False).text
+        return prody.parsePDBStream(io.StringIO(ideal_pdb_text))
+
+    def fetch_ligand_records(self, ligand):
+        """
+        Retrieves ligand records from LigandExpo
+
+        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
+        structure in the PDB using LigandExpo as outlined here:
+        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
+
+        This might be the way to go since it removes the need for all this parsing...
+
+        20170516: So I've found that free amino acids such as HIS are not retrievable using LigandExpo in this manner...
+        I'm going to need to find a solution for this. 
+
+        :param ligand: Three letter code for fragment-containing ligand
+        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
+        :return: List of all ligand HETATM records
+        """
+        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
+                                   stream=False)
+        soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
+
+        return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
+
+class Second_Shell_Alignments(Align_PDB):
+    """
+    Class for handling prerequisite information on motif residues for determining second shell interactions 
+    """
+
+    def __init__(self, motif_prody_path):
+        Align_PDB.__init__(self, pdb_file=None, target_string=None, fragment_string=None)
+        self.motif_prody = prody.parsePDB(motif_prody_path)
