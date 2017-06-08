@@ -21,15 +21,16 @@ well as binding specificity.
 
 Usage:
     bsff new <compound_name>
-    bsff generate_fragments <ligand> [options]
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
     bsff generate_motifs <user_defined_dir> [options]
     bsff prepare_motifs <user_defined_dir> [options]
-    bsff bind_by_hand <user_defined_dir> [options]
     bsff bind_everything <user_defined_dir> [options]
     bsff generate_constraints <user_defined_dir> <score_cutoff>
+    bsff generate_fragments <ligand> [options]
+    bsff bind_by_hand <user_defined_dir> [options]
+    bsff derp
 
 Arguments:
     new
@@ -52,15 +53,15 @@ Arguments:
     
     prepare_motifs
         Prepare motifs for conformer binding site generation
-        
-    bind_by_hand
-        Generate hypothetical binding sites based on motif residues bins defined by the user
     
     bind_everything
         EVERYTHING.
     
     generate_constraints
         Generate constraint files for all binding site conformations under a given score cutoff
+        
+    bind_by_hand
+        Generate hypothetical binding sites based on motif residues bins defined by the user
     
     <ligand>
         By default, this is the name of the target ligand. This can be changed
@@ -115,6 +116,56 @@ def main():
 
     if args['new']:
         print('Starting a new project for {}'.format(args['<compound_name>']))
+        project_root_dir = os.path.join(os.getcwd(), args['<compound_name>'])
+        os.makedirs(project_root_dir)
+        os.makedirs(os.path.join(project_root_dir, 'Inputs'))
+        os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Rosetta_Inputs'))
+        os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs'))
+        os.makedirs(os.path.join(project_root_dir, 'Inputs', 'User_Inputs'))
+        with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_Inputs.csv'), 'w') as fragment_inputs:
+            fragment_inputs.write('Fragment, SMILES_fragment')
+
+        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'w') as Hypothetical_Binding_Sites:
+            Hypothetical_Binding_Sites.write('\n'.join([
+                '# Hypothetical binding sites for {}'.format(args['<compound_name>']),
+                '# Create dictionaries with lists of motif bins that will be combinatorially',
+                '# combined to generate unique binding sites.',
+                '# These motif cluster names should be defined in Motif_Residue_Bins.yml',
+                '# Example:',
+                '# Binding_Site_1:',
+                '#  - Ring_Sammich_Top',
+                '#  - Ring_Sammich_Bottom',
+                '#  - Carboxyl_Bidentate',
+                '#  - Phenol_H-Bond']
+            ))
+
+        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'w') as Motif_Clusters:
+            Motif_Clusters.write('\n'.join([
+                '# Clusters to use for generating motif residues',
+                '# Create dictionaries with lists of cluster indices for each fragment.',
+                '# Representative motif residues will be pulled from these clusters.',
+                '# {}'.format(args['<compound_name>']),
+                '# Example:',
+                '# Fragment_1:',
+                '#   - 42',
+                '#   - 24',
+                '#   - 40',
+                '#   - 41',]
+            ))
+
+        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'w') as Motif_Residue_Bins:
+            Motif_Residue_Bins.write('\n'.join([
+                '# Residue bins for {}'.format(args['<compound_name>']),
+                '# Define groups of residues around the ligand that make a unique type of contact',
+                '# Create dictionaries with lists of motif residue indices for each bin',
+                '# Example:',
+                '# Phenol_H-Bond:',
+                '#   - 14',
+                '#   - 15',
+                '#   - 20',
+                '#   - 23',
+                '#   - 22']
+            ))
 
     if args['generate_fragments']:
         frag = Fragments(working_directory)
@@ -153,7 +204,7 @@ def main():
                 # Check if ligand is in exclusion list
                 if ligand not in exclude_ligand_list:
 
-                    align = Fragment_Alignments(ligand, processed_PDBs_path)
+                    align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
 
                     # Each PDB containing a fragment-containing compound
                     for pdb in pdb_check(fcc):
@@ -256,3 +307,6 @@ def main():
     if args['generate_constraints']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
         bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']))
+
+    if args['derp']:
+        print('hi')

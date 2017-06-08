@@ -57,6 +57,7 @@ def minimum_contact_distance(a_H, b_H, return_indices=False, strip_H=True):
     if strip_H:
         a = a_H.select('not hydrogen').getCoords()
         b = b_H.select('not hydrogen').getCoords()
+
     else:
         a = a_H.getCoords()
         b = b_H.getCoords()

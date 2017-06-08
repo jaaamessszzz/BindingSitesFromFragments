@@ -157,7 +157,6 @@ class Generate_Motif_Residues():
             conformer_transformation_dict[conformer_name] = {}
 
             for fragment in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')):
-                # todo: somehow define which atoms are absolutely rigid, flexible atoms mess up alignment
                 # Map fragment onto conformer
                 conformer_pdb_string = open(conformer).read()
                 fragment_pdb_string = open(fragment).read()
@@ -166,24 +165,34 @@ class Generate_Motif_Residues():
                 fragment_name = os.path.basename(os.path.normpath(fragment)).split('.')[0]
                 fragment_prody_dict[fragment_name] = prody.parsePDB(fragment)
 
-                # Debugging
                 con_name = os.path.basename(os.path.normpath(conformer))
                 frag_name = os.path.basename(os.path.normpath(fragment))
 
                 # Determine transformation for fragment onto conformer
-                align = Align_PDB(pdb_file='{}_{}'.format(con_name, frag_name),
+                align = Align_PDB(self.user_defined_dir,
+                                  pdb_file='{}_{}'.format(con_name, frag_name),
                                   target_string=conformer_pdb_string,
                                   fragment_string=fragment_pdb_string)
                 align.fragment_target_mapping()
 
-                frag_atom_coords, trgt_atom_coords = align.process_atom_mappings_into_coordinate_sets(
-                    align.fragment_target_map)
-                transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+                frag_atom_coords, trgt_atom_coords = align.process_atom_mappings_into_coordinate_sets(align.fragment_target_map)
+
+                # Align only on rigid atoms (if they are defined in Rigid_Fragment_Atoms dir)
+                frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
+                frag_rigid_pdb_name = '{}-rigid.pdb'.format(fragment_name)
+
+                if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
+                    frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords, trgt_atom_coords)
+                    transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
+                else:
+                    transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+
                 conformer_transformation_dict[conformer_name][fragment_name] = transformation
 
                 # Debugging: Outputs PDBs of fragment transformed onto corresponding atoms on conformer
+                # import io
                 # os.makedirs(os.path.join(self.user_defined_dir, 'Conformer_Tests'), exist_ok=True)
-                # transformed_fragment = prody.applyTransformation(rotation, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
+                # transformed_fragment = prody.applyTransformation(transformation, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
                 # prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
                 
         return conformer_transformation_dict
@@ -227,7 +236,13 @@ class Generate_Motif_Residues():
                     # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
                     target = open(conformer).read()
                     mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
-                    align = Align_PDB(motif_residue, mobile, target)
+
+                    align = Align_PDB(self.user_defined_dir,
+                                      pdb_file=motif_residue,
+                                      target_string=open(mobile).read(),
+                                      fragment_string=target
+                                      )
+
                     align.fragment_target_mapping()
 
                     # Get translation and rotation for fragment onto conformer
@@ -328,9 +343,6 @@ class Generate_Motif_Residues():
                                skiprows=0,
                                header=1)
 
-        # Debugging
-        pprint.pprint(score_df)
-
         # Output only necessary scores to a .csv
         score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
 
@@ -351,10 +363,9 @@ class Generate_Motif_Residues():
         # For residue in binding site
         for residue in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')):
             residue_prody = prody.parsePDB(residue)
-            RD_residue = Chem.MolFromPDBFile(residue)
-            RD_ligand = Chem.MolFromPDBFile(fragment_source_conformer_path)
+            RD_residue = Chem.MolFromPDBFile(residue, removeHs=False)
+            RD_ligand = Chem.MolFromPDBFile(fragment_source_conformer_path, removeHs=False) # Trouble?
 
-            # Debugging - duplicate maps
             residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
             residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
             ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in fragment_source_conformer.select('not hydrogen')}
@@ -363,28 +374,38 @@ class Generate_Motif_Residues():
             # NOTE: Contact distance and indicies are for residue and ligand with hydrogens stripped!
             contact_distace, residue_index_low, ligand_index_low= minimum_contact_distance(residue_prody, fragment_source_conformer, return_indices=True)
 
-            residue_contact_atom = residue_prody.select('index {}'.format(residue_index_low))
-            ligand_contact_atom = fragment_source_conformer.select('index {}'.format(ligand_index_low))
+            # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
+            # necessarily correspond to residue/ligand atom indicies... just happened to work for residues since most
+            # of them have hydrogens stripped already
+
+            residue_atom_list = [atom for atom in residue_prody.select('not hydrogen')]
+            ligand_atom_list = [atom for atom in fragment_source_conformer.select('not hydrogen')]
+
+            residue_contact_atom = residue_atom_list[residue_index_low]
+            ligand_contact_atom = ligand_atom_list[ligand_index_low]
+
+            # residue_contact_atom = residue_prody.select('index {}'.format(residue_index_low))
+            # ligand_contact_atom = fragment_source_conformer.select('index {}'.format(ligand_index_low))
 
             # Okay, now the hard part: selecting two additional atoms downstream from the contact atoms for meaningful constraints... programmatically...
             # Using RDKit to determine neighboring atoms, removes Hydrogens by default
 
             # RESIDUE CONSTRAINT ATOM INDICES
             # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
-            if residue_contact_atom.getNames()[0] in ['C', 'CA', 'CB', 'N', 'O']:
-                if residue_contact_atom.getNames()[0] == 'CB':
+            if residue_contact_atom.getName() in ['C', 'CA', 'CB', 'N', 'O']:
+                if residue_contact_atom.getName()[0] == 'CB':
                     residue_second_atom = residue_atom_index_map['CA']
                     residue_third_atom = residue_atom_index_map['C']
-                elif residue_contact_atom.getNames()[0] == 'O':
+                elif residue_contact_atom.getName()[0] == 'O':
                     residue_second_atom = residue_atom_index_map['C']
                     residue_third_atom = residue_atom_index_map['CA']
-                elif residue_contact_atom.getNames()[0] == 'N':
+                elif residue_contact_atom.getName()[0] == 'N':
                     residue_second_atom = residue_atom_index_map['CA']
                     residue_third_atom = residue_atom_index_map['C']
-                elif residue_contact_atom.getNames()[0] == 'C':
+                elif residue_contact_atom.getName()[0] == 'C':
                     residue_second_atom = residue_atom_index_map['CA']
                     residue_third_atom = residue_atom_index_map['CB']
-                elif residue_contact_atom.getNames()[0] == 'CA':
+                elif residue_contact_atom.getName()[0] == 'CA':
                     residue_second_atom = residue_atom_index_map['C']
                     residue_third_atom = residue_atom_index_map['O']
                 else:
@@ -392,10 +413,14 @@ class Generate_Motif_Residues():
                     raise Exception
 
             else:
-                residue_second_atom = self._determine_next_residue_constraint_atom(residue_index_low, RD_residue, residue_prody)
+                residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
                 residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
 
-            print('RESIDUE - FIRST ATOM: {} {}'.format(residue_index_low, residue_index_atom_map[residue_index_low]))
+            # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
+            # necessarily correspond to residue/ligand atom indicies... just happened to work for residues since most
+            # of them have hydrogens stripped already
+
+            print('RESIDUE - FIRST ATOM: {} {}'.format(residue_contact_atom.getIndex(), residue_index_atom_map[residue_contact_atom.getIndex()]))
             print('RESIDUE - SECOND ATOM: {} {}'.format(residue_second_atom, residue_index_atom_map[residue_second_atom]))
             print('RESIDUE - THIRD ATOM: {} {}'.format(residue_third_atom, residue_index_atom_map[residue_third_atom]))
 
@@ -405,19 +430,11 @@ class Generate_Motif_Residues():
             # flexible parts of the ligand... hopefully...
 
             # todo: check that third constraint atom is closer to ligand centroid than first? Eh.
-            ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_index_low, RD_ligand, fragment_source_conformer)
+            ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, fragment_source_conformer)
 
-            print('LIGAND - FIRST ATOM: {} {}'.format(ligand_index_low, ligand_index_atom_map[ligand_index_low]))
+            print('LIGAND - FIRST ATOM: {} {}'.format(ligand_contact_atom.getIndex(), ligand_index_atom_map[ligand_contact_atom.getIndex()]))
             print('LIGAND - SECOND ATOM: {} {}'.format(ligand_second_atom, ligand_index_atom_map[ligand_second_atom]))
             print('LIGAND - THIRD ATOM: {} {}'.format(ligand_third_atom, ligand_index_atom_map[ligand_third_atom]))
-
-            # Debugging
-            print('\n\n')
-            print(residue)
-
-            print(contact_distace, residue_index_low, ligand_index_low)
-            print(residue_contact_atom.getNames())
-            print(ligand_contact_atom.getNames())
 
             # Import residues from clusters
             residue_split = re.split('-|\.', os.path.basename(os.path.normpath(residue)))
@@ -541,12 +558,12 @@ class Generate_Motif_Residues():
             ligand_resname = fragment_source_conformer.getResnames()[0]
 
             constraint_block = ['CST::BEGIN',
-                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_index_low)).getNames()[0],
+                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_contact_atom.getIndex())).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_second_atom)).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_third_atom)).getNames()[0]
                                                                                         ),
                                 '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(ligand_resname),
-                                '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(residue_prody.select('index {}'.format(residue_index_low)).getNames()[0],
+                                '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(residue_prody.select('index {}'.format(residue_contact_atom.getIndex())).getNames()[0],
                                                                                         residue_prody.select('index {}'.format(residue_second_atom)).getNames()[0],
                                                                                         residue_prody.select('index {}'.format(residue_third_atom)).getNames()[0]
                                                                                         ),
@@ -585,7 +602,7 @@ class Generate_Motif_Residues():
         # Okay so starting at any given atom I should be able to determine connectivity and how many atoms out I am from CA
         atom_hierarchy = ['H', 'Z', 'E', 'D', 'G', 'B', 'A']
 
-        residue_contact_atom_neighbors = [atom.GetIdx() for atom in RD_residue.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
+        residue_contact_atom_neighbors = [atom.GetIdx() for atom in RD_residue.GetAtomWithIdx(int(current_atom_index)).GetNeighbors() if atom.GetSymbol != 'H']
         if len(residue_contact_atom_neighbors) == 1:
             next_atom_index = residue_contact_atom_neighbors[0]
             return next_atom_index
@@ -606,6 +623,8 @@ class Generate_Motif_Residues():
         ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_prody.select('not hydrogen')}
         pprint.pprint(ligand_index_atom_map)
 
+        pprint.pprint([(atom.GetSymbol(), atom.GetIdx()) for atom in RD_ligand.GetAtoms()])
+
         ligand_contact_atom_neighbors = [atom for atom in RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
 
         # Check all atoms that are adjacent to ligand contact atom
@@ -613,12 +632,13 @@ class Generate_Motif_Residues():
 
             # Only investigate potential second constraint atoms with more than one neighbor
             if len([atom.GetIdx() for atom in second_atom.GetNeighbors()]) > 1:
-                ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors()]
+                ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors() if atom.GetSymbol() != 'H']
                 second_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in ligand_second_atom_neighbors])
 
                 # Check all atoms that are adjacent to the potential second constraint atom
                 for third_atom in ligand_second_atom_neighbors:
-                    third_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in third_atom.GetNeighbors()])
+                    print(set([(atom.GetSymbol(), atom.GetIdx()) for atom in third_atom.GetNeighbors() if atom.GetSymbol() != 'H']))
+                    third_atom_neighbors_set = set([ligand_index_atom_map[atom.GetIdx()] for atom in third_atom.GetNeighbors() if atom.GetSymbol() != 'H'])
                     common_two_three = third_atom_neighbors_set & second_atom_neighbors_set
 
                     # Only investigate potential third constraint atoms with more than one neighbor, not including second atom

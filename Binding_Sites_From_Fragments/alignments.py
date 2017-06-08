@@ -23,7 +23,8 @@ class Align_PDB():
     :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
     :param target_fragment_atom_names: names of atoms in target fragment
     """
-    def __init__(self, pdb_file=None, target_string=None, fragment_string=None):
+    def __init__(self, user_defined_dir, pdb_file=None, target_string=None, fragment_string=None):
+        self.user_defined_dir = user_defined_dir
         self.pdb_file = pdb_file # Mobile PDB File to be aligned to a target
         self.target_string = target_string
         self.fragment_string = fragment_string
@@ -130,7 +131,6 @@ class Align_PDB():
         :return: dict mapping fragment atoms to target atoms
         """
         # Import fragment and target ligand
-        # todo: standardize this so that both target and fragment inputs are the same type...
         fragment_mol = Chem.MolFromPDBBlock(self.fragment_string, removeHs=False)
         target_mol_H = Chem.MolFromPDBBlock(self.target_string, removeHs=False)
 
@@ -166,13 +166,9 @@ class Align_PDB():
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
         if len(target_matches) > 1:
             fragment_target_map = self.identify_best_substructure(frag_matches, target_matches)
-            # fragment_target_mapping = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
 
         else:
             fragment_target_map = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
-
-        # todo: this is where I would insert a function to select rigid atoms from fragment map for alignments
-        # do that.
 
         # Assign successful mappings to self
         self.fragment_target_map = fragment_target_map
@@ -236,7 +232,7 @@ class Align_PDB():
 
         return frag_atom_coords, trgt_atom_coords
 
-    def determine_rotation_and_translation(self):
+    def determine_rotation_and_translation(self, current_fragment=None):
         """
         Implementing the Kabsch algorithm for aligning all fragment-containing small molecules to the target ligand
         on the mapped atoms as determined by fragment_target_mapping()
@@ -246,7 +242,56 @@ class Align_PDB():
         # todo: implement an option for RMSD cutoff where mapped atoms do not necessarily have the same conformations, e.g. sugar pucker
         frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
 
-        return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
+        # Select rigid atoms from fragment map for alignments if rigid atoms are defined in the Fragment_Inputs directory
+        frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
+        frag_rigid_pdb_name = '{}-rigid.pdb'.format(current_fragment)
+
+        if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
+            frag_atom_rigid, trgt_atom_rigid = self.return_rigid_atoms(current_fragment, frag_atom_coords, trgt_atom_coords)
+            return prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
+
+        else:
+            return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
+
+    def return_rigid_atoms(self, current_fragment, frag_atom_coords, trgt_atom_coords):
+        """
+        Returns rigid atoms as defined in Fragment_Inputs
+        
+        This relies on assumption that fragment and rigid atoms are in same coordinate frame
+        USE SAME INPUT PDB to generate fragments and rigid atom selections!!!
+        
+        Saved Atoms     V       V   V   V           V       V       V
+        Rigid Atoms   | * |   | * | * | * |   |   | * |   | * |   | * |
+        Full Fragment | * | * | * | * | * | * | * | * | * | * | * | * |
+        Mapped Target | * | * | * | * | * | * | * | * | * | * | * | * |
+        
+        :param current_fragment: 
+        :param frag_atom_coords:
+        :param trgt_atom_coords:
+        :return: 
+        """
+        frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
+        frag_rigid_pdb_name = '{}-rigid.pdb'.format(current_fragment)
+
+        frag_atom_rigid = []
+        trgt_atom_rigid = []
+
+        # Import rigid atoms from fragment inputs directory
+        fragment_rigid_prody = prody.parsePDB(os.path.join(frag_inputs_dir, frag_rigid_pdb_name))
+
+        # Get coordinates from rigid atoms
+        fragment_rigid_coords = [atom.getCoords() for atom in fragment_rigid_prody]
+
+        # For each point in fragment
+        for frag_coord, trgt_coord in zip(frag_atom_coords, trgt_atom_coords):
+
+            # If point present in rigid atoms, add frag atom and corresponding mapped atom to new coord array
+            if any([np.array_equal(frag_coord, rigid_coord) for rigid_coord in fragment_rigid_coords]):
+                frag_atom_rigid.append(frag_coord)
+                trgt_atom_rigid.append(trgt_coord)
+
+        return np.asarray(frag_atom_rigid), np.asarray(trgt_atom_rigid)
+
 
     def apply_transformation(self, transformation_matrix):
         """
@@ -265,7 +310,7 @@ class Align_PDB():
 
         # todo: somehow convert target fragment indicies to atom names that I can use for selection
         # So the reason for these super long selection strings is that the serial numbers from LigandExpo don't match
-        # up with the serial numbers fromthe PDBs for the same chain/residue/atoms...
+        # up with the serial numbers from the PDBs for the same chain/residue/atoms...
         print(self.target_fragment_atom_names)
 
         # This step is so slow...
@@ -291,8 +336,8 @@ class Fragment_Alignments(Align_PDB):
     fragments.
     """
 
-    def __init__(self, ligand='DERP', processed_PDBs_path=None, pdb_file=None, target_string=None, fragment_string=None):
-        Align_PDB.__init__(self, pdb_file=pdb_file, target_string=target_string, fragment_string=fragment_string)
+    def __init__(self, user_defined_dir, ligand='DERP', processed_PDBs_path=None, pdb_file=None, target_string=None, fragment_string=None):
+        Align_PDB.__init__(self, user_defined_dir, pdb_file=pdb_file, target_string=target_string, fragment_string=fragment_string)
         self.ligand = ligand.upper()
         self.processed_PDBs_path = processed_PDBs_path
         # Initialized later
