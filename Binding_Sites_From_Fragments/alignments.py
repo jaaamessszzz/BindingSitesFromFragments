@@ -15,6 +15,7 @@ import pprint
 class Align_PDB():
     """
     Base class with functions for aligning individual PDBs
+    NOTE: FRAGMENT NEEDS TO BE SUBSTRUCTURE OF TARGET FOR PROPER MAPPING!!!
     :param pdb_file: path to input PDB containing protein bound to fragment-containing target molecule (MOBILE)
     :param target_string: string of PDB for target ligand, fetched from LigandExpo (MOBILE)
     :param fragment_path: path to PDB of current fragment (TARGET)
@@ -164,6 +165,7 @@ class Align_PDB():
 
         # Maps fragment atom index to target atom index
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
+
         if len(target_matches) > 1:
             fragment_target_map = self.identify_best_substructure(frag_matches, target_matches)
 
