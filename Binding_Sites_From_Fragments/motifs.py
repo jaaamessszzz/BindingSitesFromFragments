@@ -126,7 +126,7 @@ class Generate_Motif_Residues():
         residue_ligand_clash_dict = {}
 
         target_molecule = os.path.normpath(self.user_defined_dir)
-        for conformer in pdb_check(os.path.join(target_molecule, 'Inputs','Rosetta_Inputs')):
+        for conformer in pdb_check(os.path.join(target_molecule, 'Inputs', 'Rosetta_Inputs')):
             if os.path.basename(os.path.normpath(conformer)) != 'conf.lib.pdb':
                 target_molecule_prody = prody.parsePDB(conformer).select('not hydrogen')
                 clashing_residue_indices = []
@@ -334,7 +334,7 @@ class Generate_Motif_Residues():
 
         score_df = pd.read_csv(scores_dir,
                                delim_whitespace=True,
-                               index_col=3,
+                               index_col=4,
                                usecols=['hbond_sc',
                                         'fa_elec',
                                         'fa_atr',
@@ -684,6 +684,11 @@ class Generate_Binding_Sites():
         self.residue_groups = residue_groups
         self.hypothetical_binding_sites = hypothetical_binding_sites
 
+        self.constraints_path = os.path.join(self.user_defined_dir, 'Complete_Matcher_Constraints')
+        self.binding_site_pdbs = os.path.join(self.constraints_path, 'Binding_Site_PDBs')
+        self.complete_constraint_files = os.path.join(self.constraints_path, 'Constraint_Files')
+
+
     def calculate_energies_and_rank(self):
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
@@ -742,6 +747,10 @@ class Generate_Binding_Sites():
                                                                       row['fa_rep'] * talaris2014_weights['fa_rep']
                                                                       ])
 
+        # Debugging
+        pprint.pprint(score_agg_dict)
+        # sys.exit()
+
         # Generate SQLite DB
         sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
 
@@ -749,11 +758,15 @@ class Generate_Binding_Sites():
         rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
         representative_motif_residue_indices = [motif.split('-')[0] for motif in pdb_check(rep_motif_path, base_only=True)]
 
+        # todo: might want to convert this into a MySQL database with multiprocessing...
+        # calculating 1.5 million binding sites for one conformer takes a while...
+
         # For every conformer I've generated
         for conformer, residue_list in residue_residue_clash_dict.items():
 
             # Get rid of any residues that clash with the ligand straight away
-            useable_residues = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
+            useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
+            useable_residues = list(set(useable_residues_distance) - set([key for key, value in score_agg_dict[conformer].items() if value > 0]))
 
             # Generate all XXX choose 4 binding site configurations
             list_of_residue_combinations = itertools.combinations(useable_residues, 4)
@@ -804,18 +817,113 @@ class Generate_Binding_Sites():
         sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
         sqlite_cusor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
 
+        # Create directories and files
+        os.makedirs(self.constraints_path, exist_ok=True)
+        os.makedirs(self.binding_site_pdbs, exist_ok=True)
+        os.makedirs(self.complete_constraint_files, exist_ok=True)
+
+        # Touch
+        open(os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt'), 'w').close()
+
         for row in sqlite_cusor.fetchall():
             row_conformer = row[0]
             row_motif_indicies = row[1:-1]
             row_score = row[5]
 
-            complete_constraints_path = os.path.join(self.user_defined_dir, 'Complete_Matcher_Constraints')
-            os.makedirs(complete_constraints_path, exist_ok=True)
+            # Generate binding site PDB
+            self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
 
             motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
 
-            with open(os.path.join(complete_constraints_path, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
+            with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
                 complete_constraint_file.write('\n'.join(motif_constraint_block_list))
+
+        # Score complete binding sites
+        self._score_constraint_file_binding_site()
+        print('Done!')
+
+
+    def _generate_constraint_file_binding_site(self, conformer, motif_indicies):
+        """
+        Generates a binding site PDB based on a constraint file
+        :param row_conformer: 
+        :param row_motif_indicies: 
+        :return: 
+        """
+
+        conformer_path = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', conformer)
+
+        # Use residue-ligand pairs in Inputs/Residue_Ligand_Interactions
+        relevant_residue_list = [open(os.path.join(conformer_path, '{}-{}.pdb'.format(conformer, str(index)))) for index in motif_indicies]
+        conformer_pdb = open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', '{}.pdb'.format(conformer))).read()
+
+        #  Ligand HETATM + Residue ATOM records
+        binding_site_pdb_path = os.path.join(self.binding_site_pdbs, '{}-{}.pdb'.format(conformer, '-'.join([str(a) for a in motif_indicies])))
+        with open(binding_site_pdb_path, 'w') as binding_site_pdb:
+            binding_site_pdb.write('# {} {}\n'.format(conformer, ' '.join([str(a) for a in motif_indicies])))
+            for res in relevant_residue_list:
+                for line in res:
+                    if line.split()[0] == 'ATOM':
+                        binding_site_pdb.write(line)
+            binding_site_pdb.write(conformer_pdb)
+
+        # Add path to .txt for scoring later
+        with open(os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt'), 'a') as score_list:
+            score_list.write('{}\n'.format(binding_site_pdb_path))
+
+    def _score_constraint_file_binding_site(self):
+        """
+        Scores a binding site as defined by a constraint file generated using calculate_energies_and_rank()
+        This is to screen for residue-residue clashes that were not caught with the distance filter
+        :return: 
+        """
+
+        # Calculate scores for all PDBs in this new directory (batch process, don't forget .params)
+        current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
+        scores_dir = os.path.join(self.constraints_path, '{}_scores_raw.txt'.format(current_ligand))
+        score_sites_list_path = os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt')
+
+        run_jd2_score = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/score_jd2.macosclangrelease',
+                                          '-l',
+                                          score_sites_list_path,
+                                          '-extra_res_fa',
+                                          os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', '{}.params'.format(current_ligand)),
+                                          '-out:file:scorefile',
+                                          scores_dir,
+                                          '-out:file:score_only',
+                                          '-overwrite'
+                                          ])
+        run_jd2_score.wait()
+
+        # Process final score file with weighted scores
+        print('Raw score file outputted as {}!'.format(scores_dir))
+
+        score_df = pd.read_csv(scores_dir,
+                               delim_whitespace=True,
+                               index_col=4,
+                               usecols=['hbond_sc',
+                                        'fa_elec',
+                                        'fa_atr',
+                                        'fa_rep',
+                                        'description'],
+                               skiprows=0,
+                               header=1)
+
+        talaris2014_weights = {'fa_atr': 1,
+                               'fa_elec': 0.875,
+                               'hbond_sc': 1.1,
+                               'fa_rep': 0.55
+                               }
+        pprint.pprint(score_df)
+        for index, row in score_df.iterrows():
+            score_df.loc[index:, 'total_score'] = sum([row['fa_atr'] * talaris2014_weights['fa_atr'],
+                                                       row['fa_elec'] * talaris2014_weights['fa_elec'],
+                                                       row['hbond_sc'] * talaris2014_weights['hbond_sc'],
+                                                       row['fa_rep'] * talaris2014_weights['fa_rep']
+                                                       ])
+
+        # Output only necessary scores to a .csv
+        score_df.to_csv(os.path.join(self.constraints_path, '{}_scores_df.csv'.format(current_ligand)))
 
     def generate_binding_sites_by_hand(self):
         """
