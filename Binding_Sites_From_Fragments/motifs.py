@@ -81,7 +81,7 @@ class Generate_Motif_Residues():
                 for res in residue_types:
                     # Calculate average residue coordinates
                     cluster_residues = [residue for residue in fragment_prody_dict[fragment][cluster]
-                                        if all([residue.getResnames()[0] == res, len(residue) == expected_atoms[residue.getResnames()[0]]])]
+                                        if all([residue.getResnames()[0] == res, len(residue) == self.expected_atoms[residue.getResnames()[0]]])]
 
                     if len(cluster_residues) > 0:
                         average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
@@ -103,9 +103,9 @@ class Generate_Motif_Residues():
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        # self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
-        # self.generate_residue_residue_clash_matrix()
-        # self.score_residue_ligand_interactions()
+        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
+        self.generate_residue_residue_clash_matrix()
+        self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints()
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
@@ -179,11 +179,13 @@ class Generate_Motif_Residues():
 
                 # Align only on rigid atoms (if they are defined in Rigid_Fragment_Atoms dir)
                 frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
-                frag_rigid_pdb_name = '{}-rigid.pdb'.format(fragment_name)
 
-                if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
-                    frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords, trgt_atom_coords)
-                    transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
+                if os.path.exists(frag_inputs_dir):
+                    frag_rigid_pdb_name = '{}-rigid.pdb'.format(fragment_name)
+
+                    if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
+                        frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords, trgt_atom_coords)
+                        transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
                 else:
                     transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
 
@@ -371,9 +373,6 @@ class Generate_Motif_Residues():
             cluster = residue_split[3]
             resname = residue_split[5]
 
-            # Debugging
-            print(fragment)
-
             residue_prody = prody.parsePDB(residue)
             RD_residue = Chem.MolFromPDBFile(residue, removeHs=False)
             RD_ligand = Chem.MolFromPDBFile(fragment_source_conformer_path, removeHs=False) # Trouble?
@@ -469,7 +468,10 @@ class Generate_Motif_Residues():
             for cluster_residue in pdb_check(fragment_cluster_path, base_only=True):
                 if cluster_residue.split('-')[0] == cluster:
                     cluster_residue_prody = prody.parsePDB(os.path.join(fragment_cluster_path, cluster_residue))
-                    if cluster_residue_prody.getResnames()[0] == resname:
+                    residue_type = cluster_residue_prody.getResnames()[0]
+
+                    # Need to filter for residues with missing atoms...
+                    if residue_type == resname and cluster_residue_prody.numAtoms() == self.expected_atoms[residue_type]:
                         cluster_residue_prody_list.append(cluster_residue_prody)
 
             #########################################################################################
@@ -596,8 +598,6 @@ class Generate_Motif_Residues():
                                 '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, torsion_constraint_sample_number),
                                 'CST::END']
 
-            print('\n'.join(constraint_block))
-
             single_constraint_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints')
             os.makedirs(single_constraint_path, exist_ok=True)
 
@@ -688,7 +688,6 @@ class Generate_Binding_Sites():
         self.binding_site_pdbs = os.path.join(self.constraints_path, 'Binding_Site_PDBs')
         self.complete_constraint_files = os.path.join(self.constraints_path, 'Constraint_Files')
 
-
     def calculate_energies_and_rank(self):
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
@@ -747,10 +746,6 @@ class Generate_Binding_Sites():
                                                                       row['fa_rep'] * talaris2014_weights['fa_rep']
                                                                       ])
 
-        # Debugging
-        pprint.pprint(score_agg_dict)
-        # sys.exit()
-
         # Generate SQLite DB
         sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
 
@@ -783,7 +778,7 @@ class Generate_Binding_Sites():
                     # Push to SQLite DB table if score is < 0
                     if total_score < 0:
                         sorted_combo = sorted(combo)
-                        print('Inserting {:10} {:3} {:3} {:3} {:3} {:7.3f} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
+                        # print('Inserting {:10} {:3} {:3} {:3} {:3} {:7.3f} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
                         sqlite_cusor.execute("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)", (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
             sqlite_connection.commit()
@@ -791,8 +786,6 @@ class Generate_Binding_Sites():
         table = pd.read_sql_query("SELECT * from binding_motif_scores", sqlite_connection)
         table.to_csv("ASDF" + '.csv', index_label='index')
         sqlite_connection.close()
-
-        self.generate_binding_site_constraints()
 
     def _generate_sqlite_db(self):
         """
@@ -825,23 +818,29 @@ class Generate_Binding_Sites():
         # Touch
         open(os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt'), 'w').close()
 
-        for row in sqlite_cusor.fetchall():
-            row_conformer = row[0]
-            row_motif_indicies = row[1:-1]
-            row_score = row[5]
+        score_table_rows = sqlite_cusor.fetchall()
 
-            # Generate binding site PDB
-            self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
+        if len(score_table_rows) > 0:
+            for row in score_table_rows:
+                score_things = True
+                row_conformer = row[0]
+                row_motif_indicies = row[1:-1]
+                row_score = row[5]
 
-            motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
+                # Generate binding site PDB
+                self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
 
-            with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
-                complete_constraint_file.write('\n'.join(motif_constraint_block_list))
+                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
 
-        # Score complete binding sites
-        self._score_constraint_file_binding_site()
-        print('Done!')
+                with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
+                    complete_constraint_file.write('\n'.join(motif_constraint_block_list))
 
+            # Score complete binding sites
+            self._score_constraint_file_binding_site()
+            print('Done!')
+
+        else:
+            print('There are no motifs with a score less than {}!'.format(score_cutoff))
 
     def _generate_constraint_file_binding_site(self, conformer, motif_indicies):
         """
