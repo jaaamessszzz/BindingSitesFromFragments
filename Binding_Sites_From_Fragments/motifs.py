@@ -12,6 +12,8 @@ import re
 import itertools
 import subprocess
 import sqlite3
+import _mysql
+import multiprocessing
 from .alignments import Align_PDB
 from .utils import *
 
@@ -688,7 +690,7 @@ class Generate_Binding_Sites():
         self.binding_site_pdbs = os.path.join(self.constraints_path, 'Binding_Site_PDBs')
         self.complete_constraint_files = os.path.join(self.constraints_path, 'Constraint_Files')
 
-    def calculate_energies_and_rank(self):
+    def calculate_energies_and_rank(self, use_mysql=True):
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
         motifs and rank.
@@ -746,18 +748,108 @@ class Generate_Binding_Sites():
                                                                       row['fa_rep'] * talaris2014_weights['fa_rep']
                                                                       ])
 
+        if use_mysql:
+              self._use_mysql(residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict)
+        else:
+              self._use_sqlite(residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict)
+
+    def _generate_sqlite_db(self):
+        """
+        Generate SQLite database + table for storing binding site scores
+        :return: 
+        """
+        db_path = os.path.join(self.user_defined_dir, 'Inputs', 'Scored_Binding_Motifs-sqlite.db')
+        db_existed = os.path.exists(db_path)
+        connection = sqlite3.connect(db_path)
+        cur = connection.cursor()
+
+        if not db_existed:
+            cur.execute("create table binding_motif_scores (conformer TEXT NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))")
+
+        return connection, cur
+
+    def _use_sqlite(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict):
         # Generate SQLite DB
         sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
 
         # List of residue indicies
         rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
-        representative_motif_residue_indices = [motif.split('-')[0] for motif in pdb_check(rep_motif_path, base_only=True)]
+        representative_motif_residue_indices = [motif.split('-')[0] for motif in
+                                                pdb_check(rep_motif_path, base_only=True)]
 
         # todo: might want to convert this into a MySQL database with multiprocessing...
         # calculating 1.5 million binding sites for one conformer takes a while...
 
         # For every conformer I've generated
         for conformer, residue_list in residue_residue_clash_dict.items():
+
+            # Get rid of any residues that clash with the ligand straight away
+            useable_residues_distance = list(
+                set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
+            useable_residues = list(set(useable_residues_distance) - set(
+                [key for key, value in score_agg_dict[conformer].items() if value > 0]))
+
+            # Generate all XXX choose 4 binding site configurations
+            list_of_residue_combinations = itertools.combinations(useable_residues, 4)
+
+            # For each combination of four residues...
+            for combo in list_of_residue_combinations:
+                # For each pair or residues, check if tuple is in residue_residue_clash_dict
+                fail_residue_combo = any([(pair in residue_list) for pair in itertools.combinations(combo, 2)])
+
+                # If there are no clashes, calculate Rosetta score (sum(fa_atr, fa_elec, hbond_sc))
+                if not fail_residue_combo:
+                    total_score = sum([score_agg_dict[conformer][res] for res in combo])
+
+                    # Push to SQLite DB table if score is < 0
+                    if total_score < 0:
+                        sorted_combo = sorted(combo)
+                        # print('Inserting {:10} {:3} {:3} {:3} {:3} {:7.3f} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
+                        sqlite_cusor.execute(
+                            "INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)",
+                            (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]),
+                             int(sorted_combo[3]), float(total_score)))
+
+            sqlite_connection.commit()
+
+        table = pd.read_sql_query("SELECT * from binding_motif_scores", sqlite_connection)
+        table.to_csv("ASDF" + '.csv', index_label='index')
+        sqlite_connection.close()
+
+    def _generate_mysql_db(self):
+        """
+        Generate a MySQL database + table for storing binding site scores
+        Switching to MySQL to support multiprocessing
+        :return: 
+        """
+        # Requires initial setup of MySQL database
+        # Create ~/.my.cnf with [client] header (username, password)
+        # Ensure MySQL permissions are set so that user can read, write, and execute
+        connection = _mysql.connect(host='localhost', read_default_file="~/.my.cnf")
+        connection.query('CREATE DATABASE IF NOT EXISTS scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
+        connection.query('USE scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
+        connection.query('CREATE TABLE IF NOT EXISTS binding_motif_scores (conformer VARCHAR(10) NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))')
+
+        return connection
+
+    def _use_mysql(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict):
+        # Generate SQLite DB
+        mysql_connection = self._generate_mysql_db()
+
+        # List of residue indicies
+        rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
+        representative_motif_residue_indices = [motif.split('-')[0] for motif in
+                                                pdb_check(rep_motif_path, base_only=True)]
+
+        def push_scores_to_db(residue_residue_clash_dict_tuple, a, b):
+
+            # DEBUGGING
+            print(residue_residue_clash_dict_tuple)
+            print(a)
+            print(b)
+            # For every conformer I've generated...
+            conformer = residue_residue_clash_dict_tuple[0]
+            residue_list = residue_residue_clash_dict_tuple[1]
 
             # Get rid of any residues that clash with the ligand straight away
             useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
@@ -778,29 +870,19 @@ class Generate_Binding_Sites():
                     # Push to SQLite DB table if score is < 0
                     if total_score < 0:
                         sorted_combo = sorted(combo)
-                        # print('Inserting {:10} {:3} {:3} {:3} {:3} {:7.3f} into SQLite3 DB'.format(conformer, sorted_combo[0], sorted_combo[1], sorted_combo[2], sorted_combo[3], total_score))
-                        sqlite_cusor.execute("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (?,?,?,?,?,?)", (str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
-            sqlite_connection.commit()
+                        # Sanitary? No. Good enough for now? Yes.
+                        mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
-        table = pd.read_sql_query("SELECT * from binding_motif_scores", sqlite_connection)
-        table.to_csv("ASDF" + '.csv', index_label='index')
-        sqlite_connection.close()
+        process = multiprocessing.Process(target=push_scores_to_db, args=(residue_residue_clash_dict.items()))
+        process.start()
+        process.join()
 
-    def _generate_sqlite_db(self):
-        """
-        Generate SQLite database + table for storing binding site scores
-        :return: 
-        """
-        db_path = os.path.join(self.user_defined_dir, 'Inputs', 'Scored_Binding_Motifs.db')
-        db_existed = os.path.exists(db_path)
-        connection = sqlite3.connect(db_path)
-        cur = connection.cursor()
-
-        if not db_existed:
-            cur.execute("create table binding_motif_scores (conformer TEXT NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))")
-
-        return connection, cur
+        data = mysql_connection.query("SELECT * from binding_motif_scores")
+        pprint.pprint(data)
+        # table = pd.read_sql_query("SELECT * from binding_motif_scores", mysql_connection)
+        # table.to_csv("ASDF" + '.csv', index_label='index')
+        mysql_connection.close()
 
     def generate_binding_site_constraints(self, score_cutoff=-15):
         """
