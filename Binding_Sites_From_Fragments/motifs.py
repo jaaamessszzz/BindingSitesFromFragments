@@ -12,8 +12,8 @@ import re
 import itertools
 import subprocess
 import sqlite3
-import _mysql
-import multiprocessing
+import MySQLdb
+from pathos.multiprocessing import ProcessingPool as Pool
 from .alignments import Align_PDB
 from .utils import *
 
@@ -825,28 +825,30 @@ class Generate_Binding_Sites():
         # Requires initial setup of MySQL database
         # Create ~/.my.cnf with [client] header (username, password)
         # Ensure MySQL permissions are set so that user can read, write, and execute
-        connection = _mysql.connect(host='localhost', read_default_file="~/.my.cnf")
+        connection = MySQLdb.connect(host='localhost', read_default_file="~/.my.cnf")
         connection.query('CREATE DATABASE IF NOT EXISTS scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
         connection.query('USE scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
         connection.query('CREATE TABLE IF NOT EXISTS binding_motif_scores (conformer VARCHAR(10) NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))')
-
-        return connection
+        cursor = connection.cursor()
+        return connection, cursor
 
     def _use_mysql(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict):
         # Generate SQLite DB
-        mysql_connection = self._generate_mysql_db()
+        mysql_connection, mysql_cursor = self._generate_mysql_db()
 
         # List of residue indicies
         rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
         representative_motif_residue_indices = [motif.split('-')[0] for motif in
                                                 pdb_check(rep_motif_path, base_only=True)]
 
-        def push_scores_to_db(residue_residue_clash_dict_tuple, a, b):
+        def push_scores_to_db(residue_residue_clash_dict_tuple):
+            connection_embed = MySQLdb.connect(host='localhost',
+                                               db='scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))),
+                                               read_default_file="~/.my.cnf")
+            cursor_embed = connection_embed.cursor()
 
-            # DEBUGGING
-            print(residue_residue_clash_dict_tuple)
-            print(a)
-            print(b)
+            score_list = []
+
             # For every conformer I've generated...
             conformer = residue_residue_clash_dict_tuple[0]
             residue_list = residue_residue_clash_dict_tuple[1]
@@ -872,25 +874,36 @@ class Generate_Binding_Sites():
                         sorted_combo = sorted(combo)
 
                         # Sanitary? No. Good enough for now? Yes.
-                        mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+                        # mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+                        score_list.append((str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
-        process = multiprocessing.Process(target=push_scores_to_db, args=(residue_residue_clash_dict.items()))
-        process.start()
+            insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
+            cursor_embed.executemany(insert_query, score_list)
+            connection_embed.commit()
+
+        process = Pool()
+        process.map(push_scores_to_db, residue_residue_clash_dict.items())
+        process.close()
         process.join()
 
-        data = mysql_connection.query("SELECT * from binding_motif_scores")
-        pprint.pprint(data)
-        # table = pd.read_sql_query("SELECT * from binding_motif_scores", mysql_connection)
-        # table.to_csv("ASDF" + '.csv', index_label='index')
         mysql_connection.close()
 
-    def generate_binding_site_constraints(self, score_cutoff=-15):
+    def generate_binding_site_constraints(self, score_cutoff=-15, use_mysql=True):
         """
         Generate constraint files (and optionally binding site PDBs) for binding sites that pass score filters
         :return: 
         """
-        sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
-        sqlite_cusor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
+        if use_mysql:
+            mysql_connection = MySQLdb.connect(host='localhost',
+                                               db='scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))),
+                                               read_default_file="~/.my.cnf")
+            mysql_cursor = mysql_connection.cursor()
+            mysql_cursor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
+            score_table_rows = mysql_cursor.fetchall()
+        else:
+            sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
+            sqlite_cusor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
+            score_table_rows = sqlite_cusor.fetchall()
 
         # Create directories and files
         os.makedirs(self.constraints_path, exist_ok=True)
@@ -899,8 +912,6 @@ class Generate_Binding_Sites():
 
         # Touch
         open(os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt'), 'w').close()
-
-        score_table_rows = sqlite_cusor.fetchall()
 
         if len(score_table_rows) > 0:
             for row in score_table_rows:
