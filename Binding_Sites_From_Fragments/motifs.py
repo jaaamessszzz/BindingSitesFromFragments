@@ -13,6 +13,7 @@ import itertools
 import subprocess
 import sqlite3
 import MySQLdb
+import collections
 from pathos.multiprocessing import ProcessingPool as Pool
 from .alignments import Align_PDB
 from .utils import *
@@ -47,11 +48,11 @@ class Generate_Motif_Residues():
         """
 
         # Assemble dict to store list of prody residue instances for each cluster
-        fragment_prody_dict = {}
+        fragment_prody_dict = collections.OrderedDict()
 
         # For each cluster in the cluster list
         for fragment in self.fragment_cluster_list:
-            fragment_prody_dict[fragment] = {}
+            fragment_prody_dict[fragment] = collections.OrderedDict()
             fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results', fragment)
 
             # Make a list for each cluster for a given fragment
@@ -78,7 +79,7 @@ class Generate_Motif_Residues():
 
             for cluster in fragment_prody_dict[fragment]:
                 # For each type of residue in cluster
-                residue_types = list(set([residue.getResnames()[0] for residue in fragment_prody_dict[fragment][cluster]]))
+                residue_types = sorted(list(set([residue.getResnames()[0] for residue in fragment_prody_dict[fragment][cluster]])))
 
                 for res in residue_types:
                     # Calculate average residue coordinates
@@ -108,7 +109,7 @@ class Generate_Motif_Residues():
         self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
         self.generate_residue_residue_clash_matrix()
         self.score_residue_ligand_interactions()
-        self.generate_residue_ligand_constraints()
+        self.generate_residue_ligand_constraints(torsion_constraint_sample_number=0, angle_constraint_sample_number=0, distance_constraint_sample_number=0)
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
         """
@@ -350,7 +351,7 @@ class Generate_Motif_Residues():
         # Output only necessary scores to a .csv
         score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
 
-    def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10, angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10, torsion_B_tolerance_d=10, torsion_constraint_sample_number=3, angle_constraint_sample_number=3, distance_constraint_sample_number=1):
+    def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10, angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10, torsion_B_tolerance_d=10, torsion_constraint_sample_number=2, angle_constraint_sample_number=2, distance_constraint_sample_number=0):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
         res1 = residue
