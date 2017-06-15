@@ -35,7 +35,7 @@ class Generate_Motif_Residues():
     def __init__(self, user_defined_dir, motif_cluster_yaml):
         self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
-        self.residue_ligand_interactions_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions')
+        self.residue_ligand_interactions_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions')
         self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
         self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
 
@@ -69,7 +69,7 @@ class Generate_Motif_Residues():
         # Okay, cool. Now that I have all of my clusters neatly organized in a dict, I can go through and generate motif
         # residues from each of the clusters based on residue type
 
-        fragment_output_dir = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
+        fragment_output_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')
         os.makedirs(fragment_output_dir, exist_ok=True)
 
         # Start going through fragments and clusters
@@ -106,7 +106,7 @@ class Generate_Motif_Residues():
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'))
+        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'))
         self.generate_residue_residue_clash_matrix()
         self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints(torsion_constraint_sample_number=0, angle_constraint_sample_number=0, distance_constraint_sample_number=0)
@@ -218,7 +218,6 @@ class Generate_Motif_Residues():
         conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
         
         # touch text file to keep track of paths for PDBs to score
-        self.score_interactions_list_path = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', 'PDBs_to_score.txt')
         open(self.score_interactions_list_path, 'w').close()
 
         # Okay so for the actually residue-residue clashing stuff for each conformer
@@ -230,7 +229,7 @@ class Generate_Motif_Residues():
                 # For each residue...
                 # Make a list of all transformed prody motif residues, then pass to minimum_contact_distance()
                 motif_residue_list = []
-                for motif_residue in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')):
+                for motif_residue in pdb_check(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')):
 
                     # Parse file name to get fragment, import prody
                     motif_prody = prody.parsePDB(motif_residue)
@@ -366,7 +365,7 @@ class Generate_Motif_Residues():
         fragment_source_conformer = prody.parsePDB(fragment_source_conformer_path)
 
         # For residue in binding site
-        for residue in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')):
+        for residue in pdb_check(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')):
 
             print(residue)
 
@@ -601,7 +600,7 @@ class Generate_Motif_Residues():
                                 '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, torsion_constraint_sample_number),
                                 'CST::END']
 
-            single_constraint_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints')
+            single_constraint_path = os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints')
             os.makedirs(single_constraint_path, exist_ok=True)
 
             with open(os.path.join(single_constraint_path, '{}.cst'.format(residue_index)), 'w') as constraint_file:
@@ -706,7 +705,7 @@ class Generate_Binding_Sites():
 
         # Import Rosetta Score df
         current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
-        score_df = pd.read_csv(os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', '{}_scores_df.csv'.format(current_ligand)), index_col='description')
+        score_df = pd.read_csv(os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', '{}_scores_df.csv'.format(current_ligand)), index_col='description')
 
         # Set up agg score dict (in the lamest fashion possible)
         score_agg_dict = {}
@@ -838,7 +837,7 @@ class Generate_Binding_Sites():
         mysql_connection, mysql_cursor = self._generate_mysql_db()
 
         # List of residue indicies
-        rep_motif_path = os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs')
+        rep_motif_path = os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')
         representative_motif_residue_indices = [motif.split('-')[0] for motif in
                                                 pdb_check(rep_motif_path, base_only=True)]
 
@@ -924,7 +923,7 @@ class Generate_Binding_Sites():
                 # Generate binding site PDB
                 self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
 
-                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
+                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
 
                 with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
                     complete_constraint_file.write('\n'.join(motif_constraint_block_list))
@@ -944,7 +943,7 @@ class Generate_Binding_Sites():
         :return: 
         """
 
-        conformer_path = os.path.join(self.user_defined_dir, 'Inputs', 'Residue_Ligand_Interactions', conformer)
+        conformer_path = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', conformer)
 
         # Use residue-ligand pairs in Inputs/Residue_Ligand_Interactions
         relevant_residue_list = [open(os.path.join(conformer_path, '{}-{}.pdb'.format(conformer, str(index)))) for index in motif_indicies]
@@ -1046,9 +1045,9 @@ class Generate_Binding_Sites():
                 cluster_sum = 0
 
                 for residue in residue_combination:
-                    for pdb in pdb_check(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs'), base_only=True):
+                    for pdb in pdb_check(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'), base_only=True):
                         if pdb.split('-')[0] == str(residue):
-                            binding_residue_list.append(prody.parsePDB(os.path.join(self.user_defined_dir, 'Representative_Residue_Motifs', pdb)))
+                            binding_residue_list.append(prody.parsePDB(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs', pdb)))
                             cluster_sum += int(pdb.split('-')[1])
 
                 # Simple distance check for all residues to prevent clashing
