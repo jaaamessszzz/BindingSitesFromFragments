@@ -5,7 +5,6 @@ import prody
 from rdkit import Chem
 from rdkit.Chem import rdFMCS
 import io
-from bs4 import BeautifulSoup
 import requests
 import sys
 import time
@@ -37,79 +36,6 @@ class Align_PDB():
         self.target_fragment_atom_names = None
         self.target_fragment_atom_serials = None
 
-    def fetch_specific_ligand_record(self, pdb_file):
-        """
-        Fetch a specific ligand record from ligand expo
-
-        :param pdb_file: path to the specific pdb file containing the desired ligand
-        :return: 
-        """
-        # I have determined this is definitely not okay...
-        # Case in point: http://ligand-expo.rcsb.org/files/4/4MZ/ipdb/1keq_4MZ_1_A_350__F__D_.ipdb
-        # It is empty. What. Why.
-
-        reject = False
-
-        # Go through all ligands bound to PDBs
-        pdbid = os.path.basename(os.path.normpath(pdb_file)).split('.')[0]
-
-        pprint.pprint(self.ligexpo_list)
-
-        for lig_request_suffix in self.ligexpo_list:
-
-            # For my specific ligand of interest bound to the correct PDB...
-            if pdbid.lower() in lig_request_suffix:
-
-                # Report
-                print("\n Checking: {}".format(lig_request_suffix))
-
-                # Get ligand record from LigExpo
-                full_lig_request = requests.get(
-                    'http://ligand-expo.rcsb.org/files/{}/{}/ipdb/{}'.format(self.ligand[0], self.ligand, lig_request_suffix),
-                    stream=False).text
-
-                # Determine whether there are multiple occupancies for the target ligand
-                # I am going to avoid using ligands with multiple occupancies as this suggests binding conformations
-                # with low affinity and specificity
-                multiple_occupancies = self._check_multiple_occupancies(full_lig_request)
-
-                print('Multiple Occupancies: {}'.format(multiple_occupancies))
-                if not multiple_occupancies:
-
-                    # ligexpo_ligand = prody.parsePDBStream(io.StringIO(full_lig_request))
-                    # Literally going line by line to count atoms...
-                    # prody is unable to parse empty pdb files, although who would even think to test that
-                    atom_count = 0
-                    for line in full_lig_request.split('\n'):
-                        if line[:6] == 'HETATM' and line[77].strip() != 'H':
-                            atom_count += 1
-
-                    # Compare ideal to ligand pulled from Ligand Expo
-                    # If the number of atoms are the same, good enough for me (at the moment)
-                    if atom_count == self.ideal_ligand_pdb.select('not hydrogen').numAtoms():
-                        # todo: find a more elegant way of testing if prody can open these
-                        # Verify whether I can actually open the ligand pdb with Prody...
-                        try:
-                            prody.parsePDBStream(io.StringIO(full_lig_request))
-                            # Test the source protein-ligand complex PDB at the same time...
-                            prody.parsePDB(pdb_file)
-                            # If everything is all good, assign variables
-                            self.pdb_file = pdb_file
-                            self.target_string = full_lig_request
-                            self.lig_request_suffix = lig_request_suffix.split('.')[0].upper()
-                            self.ligand_chain = lig_request_suffix.split('_')[3]
-                            self.ligand_ResSeq_ID = lig_request_suffix.split('_')[4]
-
-                            return reject
-
-                        except Exception as e:
-                            print(e)
-                            continue
-
-        # If I can't find any ligands fully represented, reject this PDB
-        print('\n{} REJECTED! SAD!\n'.format(pdbid))
-        return True
-
     def extract_ligand_records(self, pdb_file):
         """
         Ligand records for all instances of a fragment-containing small molecule bound to a protein
@@ -118,17 +44,13 @@ class Align_PDB():
         :param pdb_file: Path to the PDB file containing the fragment-containing ligand
         :return: String of HETAM and CONECT records from the input pdb for the given ligand
         """
-
         # Identify all instances of target ligand in PDB
         pdb_header = prody.parsePDBHeader(pdb_file)
         pdbid = pdb_header['identifier']
 
-        # Debugging
+        # Report
         print(self.ligand)
         print(pdb_file)
-
-        # Retrieve HETATM and CONECT records for each ligand (do I really need the CONECT records for what I'm doing?)
-        # Fuck it I'm getting the conect records
 
         # Start dict with ChID_resnum as keys
         # Get ligand ChID and resnum from prody header dict
@@ -180,16 +102,13 @@ class Align_PDB():
                 self.ligand_chain = potential_ligand.split('_')[0]
                 self.ligand_ResSeq_ID = potential_ligand.split('_')[1]
 
-                # Need to put this back together...
                 # http://ligand-expo.rcsb.org/ld-download.html
-                # Nvm there's a lot of data I don't use in the LigandExpo naming convention
                 self.lig_request_suffix = '{}_{}_{}_{}'.format(pdbid,
                                                                self.ligand,
                                                                self.ligand_chain,
                                                                self.ligand_ResSeq_ID
                                                                )  # PDBID, Ligand, ChID, Resnum
 
-                # Should also save all atom indices for atom selection later
                 self.ligand_atom_indicies = target_dict[potential_ligand]['atom_indices']
 
                 return False
@@ -213,8 +132,6 @@ class Align_PDB():
         if not multiple_occupancies:
 
             # Compare ideal to ligand pulled from Ligand Expo
-            # ligexpo_ligand = prody.parsePDBStream(io.StringIO(full_lig_request))
-            # Literally going line by line to count atoms...
             # prody is unable to parse empty pdb files, although who would even think to test that
             atom_count = 0
 
@@ -238,7 +155,6 @@ class Align_PDB():
                     return False
 
         return False
-
 
     def _check_multiple_occupancies(self, ligand_record_list):
         """
@@ -354,8 +270,6 @@ class Align_PDB():
         # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-fragment.pdb'.format(self.pdb_file)), frag_mapped_pdb)
         # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-target.pdb'.format(self.pdb_file)), trgt_mapped_pdb)
 
-        # print(prody.calcTransformation(frag_mapped_pdb, trgt_mapped_pdb).getMatrix())
-
         # Save atom names for mapped fragment atoms in target ligand
         self.target_fragment_atom_names = ' '.join([atom.getNames()[0] for atom in trgt_atom_selections if atom != None])
         self.target_fragment_atom_serials = ' '.join([str(atom.getSerials()[0]) for atom in trgt_atom_selections if atom != None])
@@ -442,14 +356,6 @@ class Align_PDB():
         """
         # Only work with residues within 12A of target ligand
         target_pdb = prody.parsePDB(self.pdb_file)
-
-        # todo: somehow convert target fragment indicies to atom names that I can use for selection
-        # So the reason for these super long selection strings is that the serial numbers from LigandExpo don't match
-        # up with the serial numbers from the PDBs for the same chain/residue/atoms...
-        # 20170626: Okay done. Finally.
-        
-        print(self.target_fragment_atom_names)
-
         target_shell = target_pdb.select('protein and within 12 of (serial {0}) or (serial {0})'.format(self.target_fragment_atom_serials))
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
@@ -469,14 +375,12 @@ class Fragment_Alignments(Align_PDB):
         self.ligand = ligand.upper()
         self.processed_PDBs_path = processed_PDBs_path
         # Initialized later
-        self.ligexpo_list = None
         self.ideal_ligand_pdb = None
 
     def fetch_records(self):
         """
         Only download ligands from Ligand Expo if and when required...
         """
-        # self.ligexpo_list = self.fetch_ligand_records(self.ligand)
         self.ideal_ligand_pdb = self.fetch_ideal_pdb(self.ligand)
 
     def fetch_ideal_pdb(self, ligand):
@@ -499,28 +403,6 @@ class Fragment_Alignments(Align_PDB):
                 'https://files.rcsb.org/ligands/view/{}.cif'.format(ligand), stream=False).text
             return prody.parseCIFStream(io.StringIO(ideal_cif_text))
 
-    def fetch_ligand_records(self, ligand):
-        """
-        Retrieves ligand records from LigandExpo
-
-        20170515: So I was writing up my quals proposal and I realized that I could download specific ligands for any 
-        structure in the PDB using LigandExpo as outlined here:
-        http://ligand-expo.rcsb.org/ld-download.html >> http://ligand-expo.rcsb.org/files/<HASH>/<CC_ID>/<FORMAT>/
-
-        This might be the way to go since it removes the need for all this parsing...
-
-        20170516: So I've found that free amino acids such as HIS are not retrievable using LigandExpo in this manner...
-        I'm going to need to find a solution for this. 
-
-        :param ligand: Three letter code for fragment-containing ligand
-        :param pdb_file: Path to the PDB file containing the fragment-containing ligand
-        :return: List of all ligand HETATM records across all PDBs where the ligand is bound
-        """
-        lig_request = requests.get('http://ligand-expo.rcsb.org/files/{}/{}/ipdb/'.format(ligand[0], ligand),
-                                   stream=False)
-        soupy_soup = BeautifulSoup(lig_request.text, 'html.parser')
-
-        return [link.get('href') for link in soupy_soup.find_all('a') if 'ipdb' in link.get('href')]
 
 class Second_Shell_Alignments(Align_PDB):
     """
