@@ -30,7 +30,7 @@ class Generate_Motif_Residues():
     # todo: accommodate C-term residues... could just add 1 to everything and say either or... sloppy though
     expected_atoms = {'ALA': 5, 'CYS': 6, 'ASP': 8, 'GLU': 9, 'PHE': 11, 'GLY': 4, 'HIS': 10, 'ILE': 8,
                       'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
-                      'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12}
+                      'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12, 'MSE': 8, 'SEC': 6}
 
     def __init__(self, user_defined_dir, motif_cluster_yaml):
         self.user_defined_dir = user_defined_dir
@@ -87,18 +87,72 @@ class Generate_Motif_Residues():
                                         if all([residue.getResnames()[0] == res, len(residue) == self.expected_atoms[residue.getResnames()[0]]])]
 
                     if len(cluster_residues) > 0:
-                        average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
-
-                        # Select residue closest to average
-                        rmsd_list = [prody.calcRMSD(average_coordinates, residue.getCoords()) for residue in cluster_residues]
-                        representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
+                        representative_residue = self._select_respresentative_residue(cluster_residues)
+                        residue_type = representative_residue.getResnames()[0]
 
                         # Output residue
-                        prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif_{2}-{3}'.format(fragment, cluster, motif_count, res, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
+                        prody.writePDB(os.path.join(fragment_output_dir, '{4}-{5}-{0}-Cluster_{1}-Motif_{2}-{3}'.format(fragment, cluster, motif_count, residue_type, total_motif_count, len(fragment_prody_dict[fragment][cluster]))),
                                        representative_residue)
                         total_motif_count += 1
 
                 motif_count += 1
+
+    def _select_respresentative_residue(self, cluster_residues):
+        """
+        Select representative residues from a given cluster 
+        The method for determining representative residues depends on the contact type and residue ID
+        * Work in progress *
+        
+        :param cluster_residues: list of residues in a cluster
+        :return: representative residue prody
+        """
+        average_coordinates = np.mean([a.getCoords() for a in cluster_residues], axis=0)
+
+        # Select residue closest to average
+        rmsd_list = [prody.calcRMSD(average_coordinates, residue.getCoords()) for residue in cluster_residues]
+        representative_residue = cluster_residues[rmsd_list.index(min(rmsd_list))]
+
+
+        # Check for MSE and SEC
+        # Change MSE into MET, SEC into CYS
+        representative_residue_resname = representative_residue.getResnames()[0]
+        if representative_residue_resname == 'MSE' or representative_residue_resname == 'SEC':
+            representative_residue = self._fix_mse_sec(representative_residue, representative_residue_resname)
+
+        return representative_residue
+
+    def _fix_mse_sec(self, representative_residue, resname):
+        """
+        Takes MSE/SEC and turns it into MET/CYS
+        :param representative_residue: representative_residue with Se
+        :return: representative_residue with S
+        """
+        # Find index of SE
+        res_elements = representative_residue.getElements()
+        seleno_index = [e for e in res_elements].index('SE')
+
+        # Set SE to S
+        res_elements[seleno_index] = 'S'
+
+        # Set elements to MET
+        representative_residue.setElements(res_elements)
+
+        # Set resnames MSE>MET, SEC>CYS
+        # Set seleno atom name to met/cys atom sulfur atom name
+        if resname == 'MSE':
+            representative_residue.setResnames(['MET'] * len(representative_residue))
+            res_atom_names = representative_residue.getNames()
+            res_atom_names[seleno_index] = 'SD'
+            representative_residue.setNames(res_atom_names)
+        elif resname == 'SEC':
+            representative_residue.setResnames(['CYS'] * len(representative_residue))
+            res_atom_names = representative_residue.getNames()
+            res_atom_names[seleno_index] = 'SG'
+            representative_residue.setNames(res_atom_names)
+        else:
+            raise Exception('Either MSE or SEC had to be set!')
+
+        return representative_residue
 
     def prepare_motifs_for_conformers(self):
         """
@@ -109,7 +163,7 @@ class Generate_Motif_Residues():
         self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'))
         self.generate_residue_residue_clash_matrix()
         self.score_residue_ligand_interactions()
-        self.generate_residue_ligand_constraints(torsion_constraint_sample_number=0, angle_constraint_sample_number=0, distance_constraint_sample_number=0)
+        self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
         """
@@ -189,6 +243,10 @@ class Generate_Motif_Residues():
                     if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
                         frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords, trgt_atom_coords)
                         transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
+
+                    else:
+                        transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+
                 else:
                     transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
 
@@ -436,8 +494,7 @@ class Generate_Motif_Residues():
                     residue_second_atom = residue_atom_index_map['C']
                     residue_third_atom = residue_atom_index_map['O']
                 else:
-                    print('wut.')
-                    raise Exception
+                    raise Exception('wut.')
 
             else:
                 residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
@@ -573,16 +630,10 @@ class Generate_Motif_Residues():
                 torsion_AB_tolerance = torsion_AB_tolerance_d
                 torsion_B_tolerance = torsion_B_tolerance_d
 
-            # todo: set upper bounds on tolerances...
-            # Set penalty to whatever since it isn't used by the matcher
-            # Set distance to 0, otherwise periodicity (per) to 360
-            # Set sample number so that samples are made every 5 degrees or every 0.1A
-
             residue_resname = residue_prody.getResnames()[0]
             ligand_resname = fragment_source_conformer.getResnames()[0]
 
-            constraint_block = ['CST::BEGIN',
-                                '  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_contact_atom.getIndex())).getNames()[0],
+            constraint_block = ['  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(fragment_source_conformer.select('index {}'.format(ligand_contact_atom.getIndex())).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_second_atom)).getNames()[0],
                                                                                         fragment_source_conformer.select('index {}'.format(ligand_third_atom)).getNames()[0]
                                                                                         ),
@@ -597,8 +648,8 @@ class Generate_Motif_Residues():
                                 '  CONSTRAINT::    angle_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_angle_B), angle_B_tolerance, 100, angle_constraint_sample_number),
                                 '  CONSTRAINT::  torsion_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_A), torsion_A_tolerance, 100, torsion_constraint_sample_number),
                                 '  CONSTRAINT::  torsion_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_B), torsion_B_tolerance, 100, torsion_constraint_sample_number),
-                                '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, torsion_constraint_sample_number),
-                                'CST::END']
+                                '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(float(ideal_torsion_AB), torsion_AB_tolerance, 100, torsion_constraint_sample_number)
+                                ]
 
             single_constraint_path = os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints')
             os.makedirs(single_constraint_path, exist_ok=True)
@@ -618,7 +669,7 @@ class Generate_Motif_Residues():
         residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
         
         # Setting up hierarchy for residue atom selections - want selections to propagate toward main chain
-        # So.... Z>E>D>G>B>A
+        # So.... H>Z>E>D>G>B>A
         # Okay so starting at any given atom I should be able to determine connectivity and how many atoms out I am from CA
         atom_hierarchy = ['H', 'Z', 'E', 'D', 'G', 'B', 'A']
 
@@ -630,10 +681,12 @@ class Generate_Motif_Residues():
         else:
             first_atom_ID = residue_index_atom_map[current_atom_index]
             second_atom_IDs = [residue_index_atom_map[atom] for atom in residue_contact_atom_neighbors]
+
             for atom in second_atom_IDs:
                 if atom[1] == atom_hierarchy[atom_hierarchy.index(first_atom_ID[1]) + 1]:
                     next_atom_index = residue_atom_index_map[atom]
                     return next_atom_index
+
     
     def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_prody):
         """
@@ -681,6 +734,13 @@ class Generate_Binding_Sites():
     User input required to deal with residues that obviously do not get along with other motif residues or the ligand
     e.g. steric clashing, non-favorable interactions
     """
+
+    ref2015_weights = {'fa_atr': 1,
+                       'fa_elec': 1,
+                       'hbond_sc': 1,
+                       'fa_rep': 0.55
+                       }
+
     def __init__(self, user_defined_dir, residue_groups=None, hypothetical_binding_sites=None):
         self.user_defined_dir = user_defined_dir
         self.residue_groups = residue_groups
@@ -717,35 +777,10 @@ class Generate_Binding_Sites():
             current_conformer = index.split('-')[0]
             motif_res_index = re.split('-|_', index)[2]
 
-            # Talaris2014 score term weights
-            # fa_atr 1
-            # fa_rep 0.55
-            # fa_sol 0.9375
-            # fa_intra_rep 0.005
-            # fa_elec 0.875
-            # pro_close 1.25
-            # hbond_sr_bb 1.17
-            # hbond_lr_bb 1.17
-            # hbond_bb_sc 1.17
-            # hbond_sc 1.1
-            # dslf_fa13 1.25
-            # rama 0.25
-            # omega 0.625
-            # fa_dun 0.7
-            # p_aa_pp 0.4
-            # yhh_planarity 0.625
-            # ref 1
-
-            talaris2014_weights = {'fa_atr' : 1,
-                                   'fa_elec': 0.875,
-                                   'hbond_sc': 1.1,
-                                   'fa_rep': 0.55
-                                   }
-
-            score_agg_dict[current_conformer][motif_res_index] = sum([row['fa_atr'] * talaris2014_weights['fa_atr'],
-                                                                      row['fa_elec'] * talaris2014_weights['fa_elec'],
-                                                                      row['hbond_sc'] * talaris2014_weights['hbond_sc'],
-                                                                      row['fa_rep'] * talaris2014_weights['fa_rep']
+            score_agg_dict[current_conformer][motif_res_index] = sum([row['fa_atr'] * self.ref2015_weights['fa_atr'],
+                                                                      row['fa_elec'] * self.ref2015_weights['fa_elec'],
+                                                                      row['hbond_sc'] * self.ref2015_weights['hbond_sc'],
+                                                                      row['fa_rep'] * self.ref2015_weights['fa_rep']
                                                                       ])
 
         if use_mysql:
@@ -888,7 +923,7 @@ class Generate_Binding_Sites():
 
         mysql_connection.close()
 
-    def generate_binding_site_constraints(self, score_cutoff=-15, use_mysql=True):
+    def generate_binding_site_constraints(self, score_cutoff=-15, secondary_matching=False, use_mysql=True):
         """
         Generate constraint files (and optionally binding site PDBs) for binding sites that pass score filters
         :return: 
@@ -923,10 +958,22 @@ class Generate_Binding_Sites():
                 # Generate binding site PDB
                 self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
 
+                # Get individual motif residue constraint blocks
                 motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
 
+                # Write constraint blocks to file
                 with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
-                    complete_constraint_file.write('\n'.join(motif_constraint_block_list))
+
+                    # Options for secondary matching
+                    for index, block in enumerate(motif_constraint_block_list):
+                        complete_constraint_file.write('CST::BEGIN\n')
+                        complete_constraint_file.write(motif_constraint_block_list[index])
+                        complete_constraint_file.write('\n')
+                        if secondary_matching and index != 0:
+                            complete_constraint_file.write('  ALGORITHM_INFO:: match\n')
+                            complete_constraint_file.write('    SECONDARY_MATCH: DOWNSTREAM\n')
+                            complete_constraint_file.write('  ALGORITHM_INFO::END\n')
+                        complete_constraint_file.write('CST::END\n')
 
             # Score complete binding sites
             self._score_constraint_file_binding_site()
@@ -1001,17 +1048,11 @@ class Generate_Binding_Sites():
                                skiprows=0,
                                header=1)
 
-        talaris2014_weights = {'fa_atr': 1,
-                               'fa_elec': 0.875,
-                               'hbond_sc': 1.1,
-                               'fa_rep': 0.55
-                               }
-        pprint.pprint(score_df)
         for index, row in score_df.iterrows():
-            score_df.loc[index:, 'total_score'] = sum([row['fa_atr'] * talaris2014_weights['fa_atr'],
-                                                       row['fa_elec'] * talaris2014_weights['fa_elec'],
-                                                       row['hbond_sc'] * talaris2014_weights['hbond_sc'],
-                                                       row['fa_rep'] * talaris2014_weights['fa_rep']
+            score_df.loc[index:, 'total_score'] = sum([row['fa_atr'] * self.ref2015_weights['fa_atr'],
+                                                       row['fa_elec'] * self.ref2015_weights['fa_elec'],
+                                                       row['hbond_sc'] * self.ref2015_weights['hbond_sc'],
+                                                       row['fa_rep'] * self.ref2015_weights['fa_rep']
                                                        ])
 
         # Output only necessary scores to a .csv
