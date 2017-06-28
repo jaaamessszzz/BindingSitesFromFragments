@@ -414,6 +414,16 @@ class Generate_Motif_Residues():
         res2 = ligand
         :return: 
         """
+        # todo: update to generate constraints for all conformers
+        # For each directory in Residue_Ligand_Interactions
+            # Directory name == conformer ID
+            # For each pdb
+                # Load pdb as prody
+                # Get residue (select protein)
+                # Get ligand (select resn {Ligand})
+                # Proceed as normal
+                # Output as conformer-index
+
         fragment_source_conformer_path = os.path.join(self.user_defined_dir,
                                                       'Inputs',
                                                       'Fragment_Inputs',
@@ -814,9 +824,6 @@ class Generate_Binding_Sites():
         representative_motif_residue_indices = [motif.split('-')[0] for motif in
                                                 pdb_check(rep_motif_path, base_only=True)]
 
-        # todo: might want to convert this into a MySQL database with multiprocessing...
-        # calculating 1.5 million binding sites for one conformer takes a while...
-
         # For every conformer I've generated
         for conformer, residue_list in residue_residue_clash_dict.items():
 
@@ -992,6 +999,7 @@ class Generate_Binding_Sites():
         :return: 
         """
 
+        #todo: update so that conformers constraints are supported
         conformer_path = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', conformer)
 
         # Use residue-ligand pairs in Inputs/Residue_Ligand_Interactions
