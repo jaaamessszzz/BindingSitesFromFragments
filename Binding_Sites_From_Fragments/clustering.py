@@ -117,8 +117,12 @@ class Cluster():
             # Output residue PDBs for each cluster
             count=0
             for residue in residue_list:
-                prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(count), residue[1].pdb_info)), residue[1].prody_residue)
-                count += 1
+                if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
+                                                                 'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
+                                                                 'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
+                                                                 'THR', 'VAL', 'TRP', 'TYR']:
+                    prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(count), residue[1].pdb_info)), residue[1].prody_residue)
+                    count += 1
 
         # Export .csv
         df.to_csv(os.path.join(fragment_cluster_path,'{}_report.csv'.format(fragment)))

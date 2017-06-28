@@ -6,6 +6,7 @@ Utility functions!
 import os
 import prody
 import numpy as np
+import re
 
 def generate_new_project():
     """
@@ -25,14 +26,15 @@ def directory_check(dir, base_only=False):
                 yield path
 
 
-def pdb_check(dir, base_only=False):
+def pdb_check(dir, base_only=False, conformer_check=False):
     for file in os.listdir(dir):
         path = os.path.join(dir, file)
         if path.endswith('.pdb'):
-            if base_only:
-                yield file
-            else:
-                yield path
+            if not conformer_check or (conformer_check and 'conformers' not in re.split('\.|_|-', file)):
+                if base_only:
+                    yield file
+                else:
+                    yield path
 
 
 def processed_check(processed_dir, pdb, rejected_list):
