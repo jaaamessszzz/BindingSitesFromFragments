@@ -15,6 +15,7 @@ import subprocess
 import sqlite3
 import MySQLdb
 import collections
+from scipy.special import comb
 from pathos.multiprocessing import ProcessingPool as Pool
 from .alignments import Align_PDB
 from .utils import *
@@ -161,9 +162,9 @@ class Generate_Motif_Residues():
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        # self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'))
-        # self.generate_residue_residue_clash_matrix()
-        # self.score_residue_ligand_interactions()
+        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'))
+        self.generate_residue_residue_clash_matrix()
+        self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
 
     def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
@@ -199,6 +200,13 @@ class Generate_Motif_Residues():
     def transform_motif_residues_onto_fragments(self):
         """
         Exactly what is says!
+        
+        20170627: Okay I derped extremely hard here. I need to do all of the complicated fragment mapping stuff for the 
+        clustering since I needed to identify the correct substructure in random ligands. But here I'm mapping a
+        fragment onto its source molecule... with the same atom names and everything... fuck.
+        
+        I'm going to rewrite this so that it just selects the atoms by name from the conformer and calculate the
+        transformation matrix from there... it will definitely speed things up! -_-"
         :return: 
         """
         # Precalculate transformation matrices for each fragment for each conformer
@@ -491,10 +499,6 @@ class Generate_Motif_Residues():
 
                 contact_distace, residue_index_low, ligand_index_low= minimum_contact_distance(residue_prody, conformer_fragment_atoms, return_indices=True)
 
-                import pprint
-                pprint.pprint([atom for atom in residue_prody])
-                pprint.pprint([atom for atom in conformer_fragment_atoms])
-
                 # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
                 # necessarily correspond to residue/ligand atom indicies... just happened to work for residues since most
                 # of them have hydrogens stripped already
@@ -726,16 +730,12 @@ class Generate_Motif_Residues():
                     next_atom_index = residue_atom_index_map[atom]
                     return next_atom_index
 
-    
     def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_prody):
         """
         Grabs the next ligand atoms down the line for ligand constraint records
         :return: 
         """
         ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_prody.select('not hydrogen')}
-
-        # DEBUGGING
-        pprint.pprint(ligand_index_atom_map)
 
         ligand_contact_atom_neighbors = [atom for atom in RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
 
@@ -796,9 +796,6 @@ class Generate_Binding_Sites():
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
         motifs and rank.
-        
-        Probs a good idea to use a SQLite3 DB for keeping track of all scores and binding site combintations generated
-        
         :return: 
         """
         # Retrieve list of Residue-Residue and Residue-Ligand Clashes
@@ -907,6 +904,15 @@ class Generate_Binding_Sites():
         return connection, cursor
 
     def _use_mysql(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict):
+        """
+        Evaluates viable binding sites for each conformer and pushes the binding motif + score to a database
+        Multiprocessing supported for each unique conformer
+        
+        :param residue_residue_clash_dict: 
+        :param residue_ligand_clash_dict: 
+        :param score_agg_dict: 
+        :return: 
+        """
         # Generate SQLite DB
         mysql_connection, mysql_cursor = self._generate_mysql_db()
 
@@ -921,6 +927,8 @@ class Generate_Binding_Sites():
                                                read_default_file="~/.my.cnf")
             cursor_embed = connection_embed.cursor()
 
+            # Initialize things
+            running_tally = 0
             score_list = []
 
             # For every conformer I've generated...
@@ -931,8 +939,23 @@ class Generate_Binding_Sites():
             useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
             useable_residues = list(set(useable_residues_distance) - set([key for key, value in score_agg_dict[conformer].items() if value > 0]))
 
+            # todo: implement dead-end elimination type filtering for ligand-residue scores
+            # It turns out calculating 4 million scores for each binding motif takes a long time...
+            # Residues with scores > 0 are already filtered out, need to figure out how to get rid of residues that
+            # cannot be part of the best scoring binding site conformations
+            # The tricky part is that we are only evaluating individual residue-ligand interactions here... we have no
+            # idea how residues can act synergistically in completely scored binding motifs
+
+            # Perhaps I can eliminate a percentage of conformers based on the best possible scores they can achieve?
+            # Not all of them, obviously, but say calculate the best possible binding motif (after filtering for
+            # residue-residue and residue-ligand clashes) and then get rid of the lowest XX% for conformers
+
             # Generate all XXX choose 4 binding site configurations
             list_of_residue_combinations = itertools.combinations(useable_residues, 4)
+
+            # Calculate number of rows to be calculated
+            number_of_jobs = comb(len(useable_residues), 4, exact=True)
+            print('\nWorking on {}: {} unique hypothetical binding motifs to be evaluated'.format(residue_residue_clash_dict_tuple[0], number_of_jobs))
 
             # For each combination of four residues...
             for combo in list_of_residue_combinations:
@@ -943,7 +966,7 @@ class Generate_Binding_Sites():
                 if not fail_residue_combo:
                     total_score = sum([score_agg_dict[conformer][res] for res in combo])
 
-                    # Push to SQLite DB table if score is < 0
+                    # Push to MySQL DB table if score is < 0
                     if total_score < 0:
                         sorted_combo = sorted(combo)
 
@@ -951,9 +974,24 @@ class Generate_Binding_Sites():
                         # mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
                         score_list.append((str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
-            insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
-            cursor_embed.executemany(insert_query, score_list)
-            connection_embed.commit()
+                # Push and commit to DB every 10000 rows
+                if len(score_list) == 10000:
+                    insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
+                    cursor_embed.executemany(insert_query, score_list)
+                    connection_embed.commit()
+                    running_tally += 10000
+                    print('{}\t of ~{} rows completed for {}'.format(running_tally, number_of_jobs, conformer))
+
+                    # Reset score_list
+                    score_list = []
+
+            # Final commit
+            if len(score_list) > 0:
+                insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
+                cursor_embed.executemany(insert_query, score_list)
+                connection_embed.commit()
+
+            print('{} completed!!!'.format(conformer))
 
         process = Pool()
         process.map(push_scores_to_db, residue_residue_clash_dict.items())
@@ -998,7 +1036,7 @@ class Generate_Binding_Sites():
                 self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
 
                 # Get individual motif residue constraint blocks
-                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}.cst'.format(index))).read() for index in row_motif_indicies]
+                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}-{}.cst'.format(row_conformer, index))).read() for index in row_motif_indicies]
 
                 # Write constraint blocks to file
                 with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
@@ -1024,8 +1062,8 @@ class Generate_Binding_Sites():
     def _generate_constraint_file_binding_site(self, conformer, motif_indicies):
         """
         Generates a binding site PDB based on a constraint file
-        :param row_conformer: 
-        :param row_motif_indicies: 
+        :param conformer: 
+        :param motif_indicies: 
         :return: 
         """
 
