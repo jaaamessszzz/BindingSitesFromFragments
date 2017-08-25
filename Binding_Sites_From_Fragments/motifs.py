@@ -34,12 +34,21 @@ class Generate_Motif_Residues():
                       'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
                       'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12, 'MSE': 8, 'SEC': 6}
 
-    def __init__(self, user_defined_dir, motif_cluster_yaml):
+    def __init__(self, user_defined_dir, motif_cluster_yaml, generate_single_pose=True):
+        """
+        :param user_defined_dir: 
+        :param motif_cluster_yaml: 
+        :param generate_single_pose: Generate a single pose containing ligand and all motif residues?
+        """
         self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
+        self.motif_residue_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')
         self.residue_ligand_interactions_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions')
         self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
         self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
+        self.conformer_transformation_dict = None
+        self.generate_single_pose = True
+
 
     def generate_motif_residues(self):
         """
@@ -48,7 +57,6 @@ class Generate_Motif_Residues():
         output all representative motif residues once and just ignore the ones that clash for each conformer
         * Inputs/User_Inputs/Motif_Clusters.yaml
         """
-
         # Assemble dict to store list of prody residue instances for each cluster
         fragment_prody_dict = collections.OrderedDict()
 
@@ -162,12 +170,13 @@ class Generate_Motif_Residues():
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        self.generate_residue_ligand_clash_list(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs'))
+        self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
         self.generate_residue_residue_clash_matrix()
+        self.generate_residue_ligand_clash_list()
         self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
 
-    def generate_residue_ligand_clash_list(self, motif_residue_dir, cutoff_distance=2):
+    def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
         Filters representative motif residues that are clashing with the ligand for each conformer in Inputs/Rosetta_Inputs
         Outputs a yaml file for each conformer with a list of motif residue indicies that clash
@@ -177,6 +186,8 @@ class Generate_Motif_Residues():
         :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
         :return: 
         """
+        # todo: ...it seems that this does not transform residues before determining clashes????
+        # This has been resolved.
 
         # Generate and output a yaml file for each conformer and list which residues clash
         # This way I can output all representative motif residues once and just ignore the ones that clash for each conformer
@@ -185,14 +196,17 @@ class Generate_Motif_Residues():
         residue_ligand_clash_dict = {}
 
         target_molecule = os.path.normpath(self.user_defined_dir)
-        for conformer in pdb_check(os.path.join(target_molecule, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
-            target_molecule_prody = prody.parsePDB(conformer).select('not hydrogen')
+        for conformer in directory_check(self.residue_ligand_interactions_dir):
             clashing_residue_indices = []
-            for motif_residue in pdb_check(motif_residue_dir):
-                residue_prody = prody.parsePDB(motif_residue).select('not hydrogen')
-                if minimum_contact_distance(residue_prody, target_molecule_prody) <= cutoff_distance:
-                    residue_index = os.path.basename(motif_residue).split('-')[0]
+            for motif_residue in pdb_check(conformer):
+                interaction_prody = prody.parsePDB(motif_residue)
+                residue_prody = interaction_prody.select('protein')
+                ligand_prody = interaction_prody.select('hetero')
+
+                if minimum_contact_distance(residue_prody, ligand_prody) <= cutoff_distance:
+                    residue_index = re.split('-|\.', os.path.basename(motif_residue))[1]
                     clashing_residue_indices.append(residue_index)
+
             residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
 
         yaml.dump(residue_ligand_clash_dict, open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
@@ -207,6 +221,8 @@ class Generate_Motif_Residues():
         
         I'm going to rewrite this so that it just selects the atoms by name from the conformer and calculate the
         transformation matrix from there... it will definitely speed things up! -_-"
+        
+        20170808 - This has been resolved.
         :return: 
         """
         # Precalculate transformation matrices for each fragment for each conformer
@@ -222,24 +238,21 @@ class Generate_Motif_Residues():
 
             for fragment in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')):
                 # Map fragment onto conformer
-                conformer_pdb_string = open(conformer).read()
-                fragment_pdb_string = open(fragment).read()
-
                 # Add fragment prody to fragment_prody_dict
                 fragment_name = os.path.basename(os.path.normpath(fragment)).split('.')[0]
                 fragment_prody_dict[fragment_name] = prody.parsePDB(fragment)
 
-                con_name = os.path.basename(os.path.normpath(conformer))
-                frag_name = os.path.basename(os.path.normpath(fragment))
-
                 # Determine transformation for fragment onto conformer
-                align = Align_PDB(self.user_defined_dir,
-                                  pdb_file='{}_{}'.format(con_name, frag_name),
-                                  target_string=conformer_pdb_string,
-                                  fragment_string=fragment_pdb_string)
-                align.fragment_target_mapping()
+                align = Align_PDB(self.user_defined_dir)
 
-                frag_atom_coords, trgt_atom_coords = align.process_atom_mappings_into_coordinate_sets(align.fragment_target_map)
+                # Select fragment atoms from conformer
+                conformer_prody = prody.parsePDB(conformer)
+                fragment_prody = prody.parsePDB(fragment)
+                fragment_prody_atoms_names = fragment_prody.getNames()
+                corresponding_target_atoms = conformer_prody.select('name {}'.format(' '.join(fragment_prody_atoms_names)))
+
+                frag_atom_coords = fragment_prody.getCoords()
+                trgt_atom_coords = corresponding_target_atoms.getCoords()
 
                 # Align only on rigid atoms (if they are defined in Rigid_Fragment_Atoms dir)
                 frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
@@ -279,10 +292,9 @@ class Generate_Motif_Residues():
         :return: 
         """
         
-        residue_residue_clash_dict = {}
+        # residue_residue_clash_dict = {}
+        # conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
 
-        conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
-        
         # touch text file to keep track of paths for PDBs to score
         open(self.score_interactions_list_path, 'w').close()
 
@@ -301,25 +313,10 @@ class Generate_Motif_Residues():
                 motif_filename = os.path.basename(os.path.normpath(motif_residue)).split('.')[0]
                 motif_source_fragment = motif_filename.split('-')[2]
 
-                # Map fragment to conformer
-                target = open(conformer).read()
-                mobile = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(motif_source_fragment))
-
-                # def __init__(self, Alignments, pdb_file=None, target_string=None, fragment_path=None):
-                align = Align_PDB(self.user_defined_dir,
-                                  pdb_file=motif_residue,
-                                  target_string=open(mobile).read(),
-                                  fragment_string=target
-                                  )
-
-                align.fragment_target_mapping()
-
                 # Get translation and rotation for fragment onto conformer
-                transformation_matrix = conformer_transformation_dict[conformer_name][motif_source_fragment]
+                transformation_matrix = self.conformer_transformation_dict[conformer_name][motif_source_fragment]
 
-                # transformation_matrix.setTranslation(t_vector_end)
                 transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
-
                 motif_residue_list.append((motif_filename, transformed_motif))
 
                 # # Debugging: Outputs PDBs of motif transformed relative to corresponding fragment atoms on conformer
@@ -403,8 +400,9 @@ class Generate_Motif_Residues():
 
         score_df = pd.read_csv(scores_dir,
                                delim_whitespace=True,
-                               index_col=4,
+                               index_col=5,
                                usecols=['hbond_sc',
+                                        'hbond_bb_sc',
                                         'fa_elec',
                                         'fa_atr',
                                         'fa_rep', # Commented out for now so I can just do a quick aggregate for total scores
@@ -780,6 +778,7 @@ class Generate_Binding_Sites():
     ref2015_weights = {'fa_atr': 1,
                        'fa_elec': 1,
                        'hbond_sc': 1,
+                       'hbond_bb_sc': 1,
                        'fa_rep': 0.55
                        }
 
@@ -808,9 +807,8 @@ class Generate_Binding_Sites():
 
         # Set up agg score dict (in the lamest fashion possible)
         score_agg_dict = {}
-        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), base_only=True):
-            if conformer != 'conf.lib.pdb':
-                score_agg_dict[conformer.split('.')[0]] = {}
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), base_only=True, conformer_check=True):
+            score_agg_dict[conformer.split('.')[0]] = {}
 
         for index, row in score_df.iterrows():
             current_conformer = index.split('-')[0]
@@ -818,6 +816,7 @@ class Generate_Binding_Sites():
 
             score_agg_dict[current_conformer][motif_res_index] = sum([row['fa_atr'] * self.ref2015_weights['fa_atr'],
                                                                       row['fa_elec'] * self.ref2015_weights['fa_elec'],
+                                                                      row['hbond_bb_sc'] * self.ref2015_weights['hbond_bb_sc'],
                                                                       row['hbond_sc'] * self.ref2015_weights['hbond_sc'],
                                                                       row['fa_rep'] * self.ref2015_weights['fa_rep']
                                                                       ])
@@ -921,7 +920,7 @@ class Generate_Binding_Sites():
         representative_motif_residue_indices = [motif.split('-')[0] for motif in
                                                 pdb_check(rep_motif_path, base_only=True)]
 
-        def push_scores_to_db(residue_residue_clash_dict_tuple):
+        def push_scores_to_db(residue_residue_clash_dict_tuple, filter=True):
             connection_embed = MySQLdb.connect(host='localhost',
                                                db='scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))),
                                                read_default_file="~/.my.cnf")
@@ -936,8 +935,24 @@ class Generate_Binding_Sites():
             residue_list = residue_residue_clash_dict_tuple[1]
 
             # Get rid of any residues that clash with the ligand straight away
-            useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer + '.pdb']))
-            useable_residues = list(set(useable_residues_distance) - set([key for key, value in score_agg_dict[conformer].items() if value > 0]))
+            useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer]))
+
+            if filter:
+                # todo: filter residues based on residue-ligand score, take only top ~40%
+                # we only really care about residues that make good interactions with the ligand
+                import operator
+                residues_sorted_by_score = sorted(score_agg_dict[conformer].items(), key=operator.itemgetter(1))
+
+                # Drop scores > 0
+                residues_filtered_zero = [residue for residue in residues_sorted_by_score if residue[1] < 0]
+
+                # Drop remaining residues based on top 40% cutoff
+                best_scoring_residues = int(len(residues_filtered_zero) * 0.4)
+                residues_filtered_top_scoring = residues_filtered_zero[:best_scoring_residues]
+                useable_residues = list(set(useable_residues_distance) & set([residue[0] for residue in residues_filtered_top_scoring]))
+
+            else:
+                useable_residues = list(set(useable_residues_distance) - set([key for key, value in score_agg_dict[conformer].items() if value > 0]))
 
             # todo: implement dead-end elimination type filtering for ligand-residue scores
             # It turns out calculating 4 million scores for each binding motif takes a long time...
@@ -1117,8 +1132,9 @@ class Generate_Binding_Sites():
 
         score_df = pd.read_csv(scores_dir,
                                delim_whitespace=True,
-                               index_col=4,
+                               index_col=5,
                                usecols=['hbond_sc',
+                                        'hbond_bb_sc',
                                         'fa_elec',
                                         'fa_atr',
                                         'fa_rep',
@@ -1130,6 +1146,7 @@ class Generate_Binding_Sites():
             score_df.loc[index:, 'total_score'] = sum([row['fa_atr'] * self.ref2015_weights['fa_atr'],
                                                        row['fa_elec'] * self.ref2015_weights['fa_elec'],
                                                        row['hbond_sc'] * self.ref2015_weights['hbond_sc'],
+                                                       row['hbond_bb_sc'] * self.ref2015_weights['hbond_bb_sc'],
                                                        row['fa_rep'] * self.ref2015_weights['fa_rep']
                                                        ])
 
