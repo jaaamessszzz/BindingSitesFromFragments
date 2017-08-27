@@ -172,9 +172,9 @@ class Generate_Motif_Residues():
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
         self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
         self.generate_residue_residue_clash_matrix()
-        self.generate_residue_ligand_clash_list()
-        self.score_residue_ligand_interactions()
-        self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
+        # self.generate_residue_ligand_clash_list()
+        # self.score_residue_ligand_interactions()
+        # self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
@@ -232,6 +232,9 @@ class Generate_Motif_Residues():
         fragment_prody_dict = {}
 
         # First need to do translation and rotation of all motif residues relative to fragments in new conformations
+        # 20170825 - DUDE REALLY.
+        # No need to map anything, all conformers are generated from the same input pdb from mol_to_params
+        # Select atom names used for matcher constraints...
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
             conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
             conformer_transformation_dict[conformer_name] = {}
@@ -292,11 +295,19 @@ class Generate_Motif_Residues():
         :return: 
         """
         
-        # residue_residue_clash_dict = {}
-        # conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
+        residue_residue_clash_dict = {}
 
         # touch text file to keep track of paths for PDBs to score
         open(self.score_interactions_list_path, 'w').close()
+
+        # Prepare things if I need to generate single_pose PDBs
+        if self.generate_single_pose == True:
+            # Make a convenient directory
+            single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
+            os.makedirs(single_pose_dir, exist_ok=True)
+
+            # Touch file for list of single_pose paths
+            open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
 
         # Okay so for the actually residue-residue clashing stuff for each conformer
         # For each conformer I want to determine motif clashes with...
@@ -351,7 +362,7 @@ class Generate_Motif_Residues():
         :param motif_residue_list: list of (motif_filename, motif_prody) tuples
         :return: 
         """
-        
+
         # Write all PDBs to a text file so I can score them all with score_jd2 -in:file:l <text_file_with_list.txt>
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
 
@@ -372,6 +383,25 @@ class Generate_Motif_Residues():
             with open(self.score_interactions_list_path, 'a+') as pdb_list:
                 pdb_list.write('{}\n'.format(pdb_output_path))
 
+        # Generate single pose of ligand and all motif residues if option is turned on (default)
+        if self.generate_single_pose == True:
+            # Directory and file paths
+            single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
+            single_pose_list = os.path.join(single_pose_dir, 'single_pose_list.txt')
+
+            # Make a residue explosion
+            conformer_single_pose = prody.parsePDB(conformer)
+            for motif_residue_name, residue_prody in motif_residue_list:
+                conformer_single_pose = conformer_single_pose + residue_prody
+
+            # Output residue explosion to it's own happy directory under Inputs
+            pdb_output_path = os.path.join(single_pose_dir, '{}-single_pose.pdb'.format(ligand_ID))
+            prody.writePDB(pdb_output_path, conformer_single_pose)
+
+            # Add PDB path to single_pose list
+            with open(single_pose_list, 'a') as muh_list:
+                muh_list.write(pdb_output_path + '\n')
+
     def score_residue_ligand_interactions(self):
         """
         Score each unique residue-ligand interaction with Rosetta and export to .csv (fa_atr, hbond_sc, fa_elec)
@@ -381,6 +411,8 @@ class Generate_Motif_Residues():
         # Calculate scores for all PDBs in this new directory (batch process, don't forget .params)
         current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
         scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
+
+        # todo: make a config file where users can specify Rosetta path and other things...
         run_jd2_score = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/score_jd2.macosclangrelease',
                                           '-l',
                                           self.score_interactions_list_path,
