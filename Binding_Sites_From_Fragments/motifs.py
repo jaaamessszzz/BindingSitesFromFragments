@@ -34,7 +34,7 @@ class Generate_Motif_Residues():
                       'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
                       'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12, 'MSE': 8, 'SEC': 6}
 
-    def __init__(self, user_defined_dir, motif_cluster_yaml, generate_single_pose=True):
+    def __init__(self, user_defined_dir, motif_cluster_yaml):
         """
         :param user_defined_dir: 
         :param motif_cluster_yaml: 
@@ -47,8 +47,6 @@ class Generate_Motif_Residues():
         self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
         self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
         self.conformer_transformation_dict = None
-        self.generate_single_pose = True
-
 
     def generate_motif_residues(self):
         """
@@ -171,10 +169,20 @@ class Generate_Motif_Residues():
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
         self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
-        self.generate_residue_residue_clash_matrix()
+
+        # pprint.pprint(self.conformer_transformation_dict)
+        for conformer in self.conformer_transformation_dict:
+            print(conformer)
+            for fragment in self.conformer_transformation_dict[conformer]:
+                print(fragment)
+                print(self.conformer_transformation_dict[conformer][fragment].getMatrix())
+
+        # self.generate_residue_residue_clash_matrix()
         # self.generate_residue_ligand_clash_list()
         # self.score_residue_ligand_interactions()
         # self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
+
+        self.generate_single_pose_from_selected_clusters()
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
@@ -284,7 +292,7 @@ class Generate_Motif_Residues():
 
         return conformer_transformation_dict
 
-    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2):
+    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2, generate_single_pose=True):
         """
         Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
         based on the distance of the closest atom-atom interaction between two residues.
@@ -299,15 +307,6 @@ class Generate_Motif_Residues():
 
         # touch text file to keep track of paths for PDBs to score
         open(self.score_interactions_list_path, 'w').close()
-
-        # Prepare things if I need to generate single_pose PDBs
-        if self.generate_single_pose == True:
-            # Make a convenient directory
-            single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
-            os.makedirs(single_pose_dir, exist_ok=True)
-
-            # Touch file for list of single_pose paths
-            open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
 
         # Okay so for the actually residue-residue clashing stuff for each conformer
         # For each conformer I want to determine motif clashes with...
@@ -339,31 +338,34 @@ class Generate_Motif_Residues():
             # Generate residue-conformer PDBs for scoring here so I don't have to regenerate the transformed residues...
             self.generate_residue_ligand_pdbs(conformer, motif_residue_list)
 
-            residue_residue_clash_set = set()
-            for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
-                for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
-                    outer_motif_index = outer_motif_tuple[0].split('-')[0]
-                    inner_motif_index = inner_motif_tuple[0].split('-')[0]
-                    if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
+            # todo: get rid of this
+            # residue_residue_clash_set = set()
+            # for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
+            #     for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
+            #         outer_motif_index = outer_motif_tuple[0].split('-')[0]
+            #         inner_motif_index = inner_motif_tuple[0].split('-')[0]
+            #         if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
+            #
+            #             # If clashing, append tuples in both orders... look up times? Whatever!
+            #             if outer_motif_index != inner_motif_index:
+            #                 residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
+            #                 residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
+            #
+            # residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
+            #
+            # yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
 
-                        # If clashing, append tuples in both orders... look up times? Whatever!
-                        if outer_motif_index != inner_motif_index:
-                            residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
-                            residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
-
-            residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
-
-            yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
-
-    def generate_residue_ligand_pdbs(self, conformer, motif_residue_list):
+    def generate_residue_ligand_pdbs(self, conformer, motif_residue_list, generate_residue_ligand_pairs=True, generate_single_pose=True):
         """
         Generate residue-ligand PDBs used for scoring
         :param conformer: path to pdb of conformer
         :param motif_residue_list: list of (motif_filename, motif_prody) tuples
         :return: 
         """
-
+        # todo: this might get phased out real soon once I figure out all of the Gurobi stuff...
+        # todo: separate this into its own function
         # Write all PDBs to a text file so I can score them all with score_jd2 -in:file:l <text_file_with_list.txt>
+
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
 
         ligand_ID = os.path.basename(os.path.normpath(conformer)).split('.')[0]
@@ -372,31 +374,74 @@ class Generate_Motif_Residues():
         conformer_residue_output_dir = os.path.join(self.residue_ligand_interactions_dir, ligand_ID)
         os.makedirs(conformer_residue_output_dir, exist_ok=True)
 
-        # For each motif residue in Representative_Residue_Motifs directory, combine ligand and residue
-        for motif_residue_name, residue_prody in motif_residue_list:
-            residue_ligand_prody = residue_prody + ligand_prody
-            motif_residue_index = motif_residue_name.split('-')[0]
+        if generate_residue_ligand_pairs == True:
+            # For each motif residue in Representative_Residue_Motifs directory, combine ligand and residue
+            for motif_residue_name, residue_prody in motif_residue_list:
+                residue_ligand_prody = residue_prody + ligand_prody
+                motif_residue_index = motif_residue_name.split('-')[0]
 
-            # Output ligand-residue pairs to a new Resdiue_Ligand_Interactions directory under Inputs
-            pdb_output_path = os.path.join(conformer_residue_output_dir, '{}-{}.pdb'.format(ligand_ID, motif_residue_index))
-            prody.writePDB(pdb_output_path, residue_ligand_prody)
-            with open(self.score_interactions_list_path, 'a+') as pdb_list:
-                pdb_list.write('{}\n'.format(pdb_output_path))
+                # Output ligand-residue pairs to a new Resdiue_Ligand_Interactions directory under Inputs
+                pdb_output_path = os.path.join(conformer_residue_output_dir, '{}-{}.pdb'.format(ligand_ID, motif_residue_index))
+                prody.writePDB(pdb_output_path, residue_ligand_prody)
+                with open(self.score_interactions_list_path, 'a+') as pdb_list:
+                    pdb_list.write('{}\n'.format(pdb_output_path))
 
+        # todo: separate this into its own function
         # Generate single pose of ligand and all motif residues if option is turned on (default)
-        if self.generate_single_pose == True:
+        if generate_single_pose == True:
+
+            # Make a convenient directory
+            single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
+            os.makedirs(single_pose_dir, exist_ok=True)
+
+            # Touch file for list of single_pose paths
+            open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
+
             # Directory and file paths
             single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
             single_pose_list = os.path.join(single_pose_dir, 'single_pose_list.txt')
 
             # Make a residue explosion
             conformer_single_pose = prody.parsePDB(conformer)
+
+            # Generate/append dict mapping residue indicies to source (will be exported/appended to .csv)
+            # df_columns = ['struct_id', 'source_conformer', 'residue_index', 'source_pdb']
+            residue_list_of_dicts = []
+
+            # Count residues added (not enumerating b/c I already wrote most of this...)
+            residue_count = 2 # Ligand is 1
+
             for motif_residue_name, residue_prody in motif_residue_list:
+                # Renumber all residues and set all residues to the same chain
+                residue_prody.setResnums([residue_count] * len(residue_prody))
+                residue_prody.setChids(['X'] * len(residue_prody))
+
+
+                # Add info to list of dicts
+                residue_list_of_dicts.append({'struct_id': int(ligand_ID.split('_')[1]),
+                                              'source_conformer': ligand_ID,
+                                              'residue_index': residue_count,
+                                              'source_pdb': motif_residue_name
+                                              })
+
+                # Add to residue explosion
                 conformer_single_pose = conformer_single_pose + residue_prody
+                residue_count += 1
 
             # Output residue explosion to it's own happy directory under Inputs
             pdb_output_path = os.path.join(single_pose_dir, '{}-single_pose.pdb'.format(ligand_ID))
             prody.writePDB(pdb_output_path, conformer_single_pose)
+
+            # Add residue index to new/existing .csv
+            output_csv_path = os.path.join(single_pose_dir, 'residue_index_mapping.csv')
+            if os.path.exists(output_csv_path):
+                df_existing = pd.read_csv(output_csv_path, index_col=0)
+                df_new = pd.DataFrame(residue_list_of_dicts)
+                df_concat = df_existing.append(df_new, ignore_index=True)
+                df_concat.to_csv(output_csv_path)
+            else:
+                df_new = pd.DataFrame(residue_list_of_dicts)
+                df_new.to_csv(output_csv_path)
 
             # Add PDB path to single_pose list
             with open(single_pose_list, 'a') as muh_list:
@@ -559,7 +604,7 @@ class Generate_Motif_Residues():
                         residue_third_atom = residue_atom_index_map['C']
                     elif residue_contact_atom.getName()[0] == 'C':
                         residue_second_atom = residue_atom_index_map['CA']
-                        residue_third_atom = residue_atom_index_map['CB']
+                        residue_third_atom = residue_atom_index_map['N']
                     elif residue_contact_atom.getName()[0] == 'CA':
                         residue_second_atom = residue_atom_index_map['C']
                         residue_third_atom = residue_atom_index_map['O']
@@ -799,6 +844,63 @@ class Generate_Motif_Residues():
         # so I can pull out second shell interaction patterns
         pass
 
+    def generate_single_pose_from_selected_clusters(self):
+        """
+        20170829 - Now that I have Gurobi up and running, I want to see if I can use all residues from clusters in
+        binding motif generation. This will simply take all residues from selected clusters and add them to a single
+        pose. I am going to need to do all the transformations for all residues for each conformer... which mean I will
+        need to update transform_motif_residues_onto_fragments() soon to track matcher constraint atoms. 
+        :return: 
+        """
+        # 1. Generate dict of fragments and all associated clusters
+
+        # Pirated from my generate_motif_residue()
+        # Assemble dict to store list of prody residue instances for each cluster
+        fragment_prody_dict = collections.OrderedDict()
+
+        # For each cluster in the cluster list
+        for fragment in self.fragment_cluster_list:
+            fragment_prody_dict[fragment] = collections.OrderedDict()
+            fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results', fragment)
+
+            # Make a list for each cluster for a given fragment
+            for cluster_number in self.fragment_cluster_list[fragment]:
+                fragment_prody_dict[fragment][int(cluster_number)] = []
+
+            # Check pdbs for given fragment and add to appropriate cluster list
+            for fragment_pdb in pdb_check(fragment_cluster_path, base_only=True):
+                cluster_number = int(re.split('-|_', fragment_pdb)[1])
+
+                if cluster_number in self.fragment_cluster_list[fragment]:
+                    fragment_prody_dict[fragment][cluster_number].append(
+                        ['-'.join([fragment, fragment_pdb]),
+                         prody.parsePDB(os.path.join(fragment_cluster_path, fragment_pdb))])
+                         # prody.parsePDB(os.path.join(fragment_cluster_path, fragment_pdb)).select('not hydrogen')])
+
+        pprint.pprint(fragment_prody_dict)
+
+        # Then for each conformer...
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
+
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+
+            # Make a list of all transformed prody motif residues
+            motif_residue_list = []
+
+            for dict_fragment in fragment_prody_dict:
+                for cluster_index in fragment_prody_dict[dict_fragment]:
+                    for cluster_member_tuple in fragment_prody_dict[dict_fragment][cluster_index]:
+                        print(dict_fragment, cluster_index, cluster_member_tuple)
+
+                        # Get translation and rotation for fragment onto conformer
+                        transformation_matrix = self.conformer_transformation_dict[conformer_name][dict_fragment]
+
+                        transformed_motif = prody.applyTransformation(transformation_matrix, cluster_member_tuple[1])
+                        motif_residue_list.append((cluster_member_tuple[0], transformed_motif))
+
+            pprint.pprint(motif_residue_list)
+
+            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=False)
 
 class Generate_Binding_Sites():
     """
@@ -1007,19 +1109,21 @@ class Generate_Binding_Sites():
             # For each combination of four residues...
             for combo in list_of_residue_combinations:
                 # For each pair or residues, check if tuple is in residue_residue_clash_dict
-                fail_residue_combo = any([(pair in residue_list) for pair in itertools.combinations(combo, 2)])
+
+                # TEMP: Commented out for now
+                # fail_residue_combo = any([(pair in residue_list) for pair in itertools.combinations(combo, 2)])
 
                 # If there are no clashes, calculate Rosetta score (sum(fa_atr, fa_elec, hbond_sc))
-                if not fail_residue_combo:
-                    total_score = sum([score_agg_dict[conformer][res] for res in combo])
+                # if not fail_residue_combo:
+                total_score = sum([score_agg_dict[conformer][res] for res in combo])
 
                     # Push to MySQL DB table if score is < 0
-                    if total_score < 0:
-                        sorted_combo = sorted(combo)
+                    # if total_score < 0:
+                sorted_combo = sorted(combo)
 
                         # Sanitary? No. Good enough for now? Yes.
                         # mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
-                        score_list.append((str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+                score_list.append((str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
 
                 # Push and commit to DB every 10000 rows
                 if len(score_list) == 10000:
@@ -1244,3 +1348,16 @@ class Generate_Binding_Sites():
 
                     # Output PDB
                     prody.writePDB(os.path.join(output_path, binding_site_description), complete_binding_site)
+
+    def generate_binding_sites_from_gurobi(self):
+        """
+        20170829 - So I was thinking about it... once I generate a single pose with all of my motif residues, I can pull
+        residues directly from it to generate my binding motif PDBs. No need to keep track of cluster residue names and 
+        all that except for traceback purposes.
+        
+        I keep track of residue indicies in the single poses. Once I get results from Gurobi, I can just use prody to
+        select those residues from the single pose and output them... will also need to come up with a way to generate
+        the constraint files in parallel... should be easy enough...
+        :return: 
+        """
+        pass
