@@ -10,6 +10,7 @@ import pprint
 import yaml
 import io
 import re
+import copy
 import itertools
 import subprocess
 import sqlite3
@@ -169,13 +170,6 @@ class Generate_Motif_Residues():
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
         self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
-
-        # pprint.pprint(self.conformer_transformation_dict)
-        for conformer in self.conformer_transformation_dict:
-            print(conformer)
-            for fragment in self.conformer_transformation_dict[conformer]:
-                print(fragment)
-                print(self.conformer_transformation_dict[conformer][fragment].getMatrix())
 
         # self.generate_residue_residue_clash_matrix()
         # self.generate_residue_ligand_clash_list()
@@ -877,8 +871,6 @@ class Generate_Motif_Residues():
                          prody.parsePDB(os.path.join(fragment_cluster_path, fragment_pdb))])
                          # prody.parsePDB(os.path.join(fragment_cluster_path, fragment_pdb)).select('not hydrogen')])
 
-        pprint.pprint(fragment_prody_dict)
-
         # Then for each conformer...
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
 
@@ -888,17 +880,17 @@ class Generate_Motif_Residues():
             motif_residue_list = []
 
             for dict_fragment in fragment_prody_dict:
+
+                # Get translation and rotation for fragment onto conformer
+                transformation_matrix = self.conformer_transformation_dict[conformer_name][dict_fragment]
+
                 for cluster_index in fragment_prody_dict[dict_fragment]:
                     for cluster_member_tuple in fragment_prody_dict[dict_fragment][cluster_index]:
-                        print(dict_fragment, cluster_index, cluster_member_tuple)
 
-                        # Get translation and rotation for fragment onto conformer
-                        transformation_matrix = self.conformer_transformation_dict[conformer_name][dict_fragment]
-
-                        transformed_motif = prody.applyTransformation(transformation_matrix, cluster_member_tuple[1])
+                        # Deep copy required... applyTransformation uses pointers to residue location
+                        deepcopy_residue = copy.deepcopy(cluster_member_tuple[1])
+                        transformed_motif = prody.applyTransformation(transformation_matrix, deepcopy_residue)
                         motif_residue_list.append((cluster_member_tuple[0], transformed_motif))
-
-            pprint.pprint(motif_residue_list)
 
             self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=False)
 
