@@ -171,12 +171,15 @@ class Generate_Motif_Residues():
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
         self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
 
-        # self.generate_residue_residue_clash_matrix()
+        # Generate poses for representative residues only
+        self.generate_residue_residue_clash_matrix()
+
+        # Generate poses for all cluster residues
+        # self.generate_single_pose_from_selected_clusters()
+
         # self.generate_residue_ligand_clash_list()
         # self.score_residue_ligand_interactions()
         # self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
-
-        self.generate_single_pose_from_selected_clusters()
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
@@ -286,7 +289,7 @@ class Generate_Motif_Residues():
 
         return conformer_transformation_dict
 
-    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2, generate_single_pose=True):
+    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2, actually_generate_matrix=True):
         """
         Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
         based on the distance of the closest atom-atom interaction between two residues.
@@ -332,22 +335,22 @@ class Generate_Motif_Residues():
             # Generate residue-conformer PDBs for scoring here so I don't have to regenerate the transformed residues...
             self.generate_residue_ligand_pdbs(conformer, motif_residue_list)
 
-            # todo: get rid of this
-            # residue_residue_clash_set = set()
-            # for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
-            #     for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
-            #         outer_motif_index = outer_motif_tuple[0].split('-')[0]
-            #         inner_motif_index = inner_motif_tuple[0].split('-')[0]
-            #         if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
-            #
-            #             # If clashing, append tuples in both orders... look up times? Whatever!
-            #             if outer_motif_index != inner_motif_index:
-            #                 residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
-            #                 residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
-            #
-            # residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
-            #
-            # yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
+            if actually_generate_matrix == True:
+                residue_residue_clash_set = set()
+                for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
+                    for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
+                        outer_motif_index = outer_motif_tuple[0].split('-')[0]
+                        inner_motif_index = inner_motif_tuple[0].split('-')[0]
+                        if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
+
+                            # If clashing, append tuples in both orders... look up times? Whatever!
+                            if outer_motif_index != inner_motif_index:
+                                residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
+                                residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
+
+                residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
+
+                yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
 
     def generate_residue_ligand_pdbs(self, conformer, motif_residue_list, generate_residue_ligand_pairs=True, generate_single_pose=True):
         """
@@ -388,8 +391,8 @@ class Generate_Motif_Residues():
             single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
             os.makedirs(single_pose_dir, exist_ok=True)
 
-            # Touch file for list of single_pose paths
-            open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
+            # # Touch file for list of single_pose paths
+            # open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
 
             # Directory and file paths
             single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
@@ -403,6 +406,7 @@ class Generate_Motif_Residues():
             residue_list_of_dicts = []
 
             # Count residues added (not enumerating b/c I already wrote most of this...)
+            # todo: this will need to be fixed when we move to designing DNA/RNA interactions
             residue_count = 2 # Ligand is 1
 
             for motif_residue_name, residue_prody in motif_residue_list:
