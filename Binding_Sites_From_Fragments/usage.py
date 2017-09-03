@@ -27,10 +27,12 @@ Usage:
     bsff generate_motifs <user_defined_dir> [options]
     bsff prepare_motifs <user_defined_dir> [options]
     bsff bind_everything <user_defined_dir> [options]
-    bsff generate_constraints <user_defined_dir> <score_cutoff>
+    bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
+    bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
     bsff generate_fragments <ligand> [options]
     bsff bind_by_hand <user_defined_dir> [options]
-    bsff derp
+    bsff derp <user_defined_dir>
+    bsff gurobi <user_defined_dir>
 
 Arguments:
     new
@@ -59,6 +61,9 @@ Arguments:
     
     generate_constraints
         Generate constraint files for all binding site conformations under a given score cutoff
+    
+    pull_constraints
+        Pull constraint files with scores above a defined cutoff into a new directory
         
     bind_by_hand
         Generate hypothetical binding sites based on motif residues bins defined by the user
@@ -71,8 +76,11 @@ Arguments:
         Directory defined by user containing PubChem search results
 
     <score_cutoff>
-        Absolute value of dcore cutoff to use to generate constraint files. WILL BE CONVERTED TO NEGATIVE NUMBER,
+        Absolute value of score cutoff to use to generate constraint files. WILL BE CONVERTED TO NEGATIVE NUMBER,
         it's a pain to enter negative numbers in the command line... :(
+    
+    <number_to_pull>
+        Limit to number of constraint files to pull with --number_to_pull option
         
 Options:
     -c --clusters <clusters>
@@ -83,6 +91,12 @@ Options:
         
     -f --ligand_input_format <format>
         Use a different input format for the ligand. [CID|name|smiles]
+        
+    -m --secondary_matching
+        Use secondary matching for constraint files
+    
+    -n --number_to_pull
+        Limit the number of binding site constraint files to pull
         
     -r --rosetta_scores
         Calculate Rosetta score terms for unique residue-ligand interactions during the motif residue generation step
@@ -99,11 +113,14 @@ import os
 import sys
 import pprint
 import yaml
+import shutil
+import pandas as pd
 from .fragments import Fragments
 from .alignments import Fragment_Alignments
 from .clustering import Cluster
 from .motifs import Generate_Motif_Residues, Generate_Binding_Sites
 from .utils import *
+from .gurobi_scoring import *
 
 def main():
 
@@ -204,8 +221,6 @@ def main():
                 # Check if ligand is in exclusion list
                 if ligand not in exclude_ligand_list:
 
-                    align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
-
                     # Each PDB containing a fragment-containing compound
                     for pdb in pdb_check(fcc):
                         pdbid = os.path.basename(os.path.normpath(pdb))
@@ -220,11 +235,16 @@ def main():
                         processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
 
                         if not processed_check(processed_dir, pdbid, rejected_list):
+                            print("\n\nProcessing {}".format(pdbid))
                             # Set things up! Get ligands from Ligand Expo
                             # This is to avoid downloading ligands when all PDBs have already been processed
 
+                            align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
+
                             # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
                             # I can't believe how unorganized everything is, damn.
+
+                            # Fetches ideal pdbs and list of PDB records where ligand is bound (for now)
                             try:
                                 align.fetch_records()
 
@@ -236,7 +256,9 @@ def main():
 
                             # Extract HETATM and CONECT records for the target ligand
                             # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-                            reject = align.fetch_specific_ligand_record(pdb)
+
+                            reject = align.extract_ligand_records(pdb)
+                            # reject = align.fetch_specific_ligand_record(pdb)
 
                             # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
                             if reject:
@@ -263,24 +285,24 @@ def main():
 
                         else:
                             print('{} has been processed!'.format(pdb))
+
     if args['cluster']:
         for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-            # processed_PDBs_dir, distance_cutoff, number_of_clusters, weights
+            # processed_PDBs_dir, distance_cutoff, weights
 
             # Set weights
             weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1,1,1,1]
             # Set distance cutoff
-            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 4
-            # Set number of clusters
-            number_of_clusters = args['--clusters'] if args['--clusters'] else 6
+            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 5
 
-            cluster = Cluster(fragment, distance_cutoff, number_of_clusters, weights)
+            cluster = Cluster(fragment, distance_cutoff, weights)
 
             if len(cluster.pdb_object_list) > 2:
                 cluster.cluster_scipy()
 
             if cluster.clusters is not None:
                 cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
+                cluster.automated_cluster_selection()
 
     if args['generate_motifs']:
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
@@ -302,11 +324,42 @@ def main():
     if args['bind_everything']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
         bind.calculate_energies_and_rank()
-        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -15)
+        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -25)
 
     if args['generate_constraints']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
-        bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']))
+        bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
+
+    if args['pull_constraints']:
+
+        df_unsorted = pd.read_csv(os.path.join(args['<user_defined_dir>'],
+                                               'Complete_Matcher_Constraints',
+                                               '{}_scores_df.csv'.format(os.path.basename(os.path.normpath(args['<user_defined_dir>'])))
+                                               )
+                                  )
+
+        df = df_unsorted.sort_values('total_score', ascending=True)
+        df.reset_index(inplace=True)
+
+        score_cutoff = -float(args['<score_cutoff>'])
+
+        source_dir = os.path.join(args['<user_defined_dir>'], 'Complete_Matcher_Constraints', 'Constraint_Files')
+        destination_dir = os.path.join(args['<user_defined_dir>'], 'Pulled_Constraints')
+        os.makedirs(destination_dir, exist_ok=False)
+
+        number_cutoff = int(args['<number_to_pull>']) if args['--number_to_pull'] else df.shape[0]
+
+        for index, row in df.iterrows():
+            if row['total_score'] < score_cutoff and index < number_cutoff:
+                cst_file_name = '{}.cst'.format(row['description'][:-5])
+                shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
 
     if args['derp']:
-        print('hi')
+        import prody
+        conformers = prody.parsePDB(os.path.join(os.getcwd(), 'ONPF/Inputs/Rosetta_Inputs/Omega_Conformers/ONP_conformers.pdb'), model=10)
+
+    if args['gurobi']:
+        gurobi = score_with_gurobi(args['<user_defined_dir>'])
+        gurobi.generate_feature_reporter_db()
+        gurobi.consolidate_scores_better()
+        gurobi.do_gurobi_things()

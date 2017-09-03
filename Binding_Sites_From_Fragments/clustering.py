@@ -13,13 +13,13 @@ class Cluster():
     This class is responsible for taking aligned fragment PDBs and identifying representative contacts. 
     """
 
-    def __init__(self, processed_PDBs_dir, distance_cutoff, number_of_clusters, weights):
+    def __init__(self, processed_PDBs_dir, distance_cutoff, weights):
         self.processed_PDBs_dir = processed_PDBs_dir
         self.weights = weights
-        self.number_of_clusters = number_of_clusters
         self.distance_cutoff = distance_cutoff
         self.pdb_object_list = self._import_pdbs()
         self.clusters = None
+        self.df = None
 
     def _import_pdbs(self):
         """
@@ -48,7 +48,7 @@ class Cluster():
 
         return processsed_residue_list_cleaned
 
-    def cluster_scipy(self):
+    def cluster_scipy(self, display_dendrogram=False):
         """
         Using Hierarchical clustering through scipy to identify representative contacts. 
         :return: 
@@ -60,45 +60,30 @@ class Cluster():
         vector_array = np.asarray([thingy.vector for thingy in self.pdb_object_list])
         Z = linkage(vector_array, 'ward')
 
-        # Generate dendrogram
-        # todo: CHANGE THIS. Taken straight from https://joernhees.de/blog/2015/08/26/scipy-hierarchical-clustering-and-dendrogram-tutorial
-        fig = plt.figure(figsize=(25, 10))
-        plt.title('Hierarchical Clustering Dendrogram')
-        plt.xlabel('sample index')
-        plt.ylabel('distance')
-        ax = fig.gca()
-        ax.set_ylim(5)
-        dendrogram(
-            Z,
-            leaf_rotation=90.,  # rotates the x axis labels
-            leaf_font_size=8.,  # font size for the x axis labels
-        )
-        # plt.show()
+        if display_dendrogram == True:
+            # Generate dendrogram
+            # todo: CHANGE THIS. Taken straight from https://joernhees.de/blog/2015/08/26/scipy-hierarchical-clustering-and-dendrogram-tutorial
+            fig = plt.figure(figsize=(25, 10))
+            plt.title('Hierarchical Clustering Dendrogram')
+            plt.xlabel('sample index')
+            plt.ylabel('distance')
+            ax = fig.gca()
+            ax.set_ylim(5)
+            dendrogram(
+                Z,
+                leaf_rotation=90.,  # rotates the x axis labels
+                leaf_font_size=8.,  # font size for the x axis labels
+            )
+            plt.show()
 
-        # Debugging
-        # Set default to 2 for now
-        # self.distance_cutoff = input('Enter desired distance cutoff: ').strip()
-        self.distance_cutoff = 2
+        self.distance_cutoff = 2**0.5
         self.clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
-
-    def cluster_sklearn_agglomerative(self):
-        """
-        Using Agglomerative Hierarchical clustering algorithm through sk-learn to identify representitive contacts.
-        :return: 
-        self.clusters: list of indicies corresponding to cluster numbers for each element in self.pdb_object_list
-        """
-        from sklearn.cluster import AgglomerativeClustering
-        # todo: figure out a way to scale number of clusters based on the number of residues in the list...
-        self.number_of_clusters = len(self.pdb_object_list)//20
-        if self.number_of_clusters > 2:
-            self.clusters = AgglomerativeClustering(n_clusters=self.number_of_clusters).fit_predict([thingy.vector for thingy in self.pdb_object_list])
 
     def generate_output_directories(self, base_dir, fragment_path):
         residue_cluster_pairs = [(cluster, residue)for cluster, residue in zip(self.clusters, self.pdb_object_list)]
         fragment = os.path.basename(os.path.normpath(fragment_path))
 
-        # Create pandas dataframe, where each row has data on a specific residue
-        df = pd.DataFrame(columns=['cluster_index','cluster_members', 'cutoff', 'atom-atom_mean', 'atom-atom_SD', 'atom-centroid_mean', 'atom-centroid_SD'])
+        dict_list = []
 
         for cluster in set(self.clusters):
             # Generate list of fragment_PDB objects containing all relevant information on residue-ligand contacts in a cluster
@@ -108,24 +93,23 @@ class Cluster():
                                      fragment
                                      )
 
-            os.makedirs(fragment_cluster_path,
-                        exist_ok=True)
+            os.makedirs(fragment_cluster_path, exist_ok=True)
 
             # Generate report on cluster qualities
-            df = df.append(self.generate_report_row(residue_list, cluster))
+            dict_list.append(self.generate_report_row(residue_list, cluster))
 
             # Output residue PDBs for each cluster
             count=0
-            for residue in residue_list:
+            for index, residue in enumerate(residue_list):
                 if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
                                                                  'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
                                                                  'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                                                  'THR', 'VAL', 'TRP', 'TYR']:
-                    prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(count), residue[1].pdb_info)), residue[1].prody_residue)
-                    count += 1
+                    prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(index), residue[1].pdb_info)), residue[1].prody_residue)
 
         # Export .csv
-        df.to_csv(os.path.join(fragment_cluster_path,'{}_report.csv'.format(fragment)))
+        self.df = pd.DataFrame(dict_list)
+        self.df.to_csv(os.path.join(fragment_cluster_path,'{}_report.csv'.format(fragment)))
 
     def generate_report_row(self, residue_list, cluster_number):
         """
@@ -141,24 +125,52 @@ class Cluster():
         atom_atom_mean = np.degrees(np.mean(atom_atom_angle_deviations))
         atom_atom_SD = np.degrees(np.std(atom_atom_angle_deviations))
 
+        # 20170901 - I've determined that the atom-centroid mean and SD aren't useful metrics...
         # Determine spread in unit vectors connecting min ligand contact atom and residue centroids
-        atom_centroid_vectors = [(residue[1].residue_center - residue[1].ligand_contact_atom.getCoords()[0]) /
-                                 np.linalg.norm(residue[1].residue_center - residue[1].ligand_contact_atom.getCoords()[0])
-                                 for residue in residue_list]
-        atom_centroid_centroid_vector = np.mean(atom_centroid_vectors, axis=0)
+        # atom_centroid_vectors = [(residue[1].residue_center - residue[1].ligand_contact_atom.getCoords()[0]) /
+        #                          np.linalg.norm(residue[1].residue_center - residue[1].ligand_contact_atom.getCoords()[0])
+        #                          for residue in residue_list]
+        # atom_centroid_centroid_vector = np.mean(atom_centroid_vectors, axis=0)
+        #
+        # atom_centroid_angle_deviations = [np.arccos(np.dot(atom_centroid_centroid_vector, atom_centroid_vector)) for atom_centroid_vector in atom_centroid_vectors]
+        # atom_centroid_mean = np.degrees(np.mean(atom_centroid_angle_deviations))
+        # atom_centroid_SD = np.degrees(np.std(atom_centroid_angle_deviations))
 
-        # Debugging
-        # print(atom_centroid_vectors)
-        # print(atom_centroid_centroid_vector)
+        return {'cluster_index': cluster_number,
+                'cluster_members': len(residue_list),
+                'cutoff': self.distance_cutoff,
+                'atom-atom_mean': atom_atom_mean,
+                'atom-atom_SD': atom_atom_SD
+                }
 
-        atom_centroid_angle_deviations = [np.arccos(np.dot(atom_centroid_centroid_vector, atom_centroid_vector)) for atom_centroid_vector in atom_centroid_vectors]
-        atom_centroid_mean = np.degrees(np.mean(atom_centroid_angle_deviations))
-        atom_centroid_SD = np.degrees(np.std(atom_centroid_angle_deviations))
+    def automated_cluster_selection(self):
+        """
+        Automatically selects clusters based on number of members in each clusters. Clusters >1 SD above mean will be 
+        selected for motif residue pool.
+        :return: 
+        """
+        # Bruh. Paths.
+        motif_yaml_path = os.path.join(self.processed_PDBs_dir.split('/')[0], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml')
+        current_fragment = os.path.basename(os.path.normpath(self.processed_PDBs_dir))
 
-        return pd.Series(data=[cluster_number, len(residue_list), self.distance_cutoff, atom_atom_mean, atom_atom_SD, atom_centroid_mean, atom_centroid_SD],
-                         index=['cluster_index','cluster_members', 'cutoff', 'atom-atom_mean', 'atom-atom_SD', 'atom-centroid_mean', 'atom-centroid_SD'],
-                         name='cluster_{}'.format(cluster_number)
-                         )
+        # Select worthy clusters
+        sorted_df = self.df.sort_values('cluster_members',ascending=False)
+
+        cluster_size_mean = self.df.agg({'cluster_members': 'mean'})[0]
+        cluster_size_SD = self.df.agg({'cluster_members': 'std'})[0]
+
+        print('Cluster size mean:', cluster_size_mean)
+        print('Cluster size SD:', cluster_size_SD)
+
+        selected_cluster_rows = sorted_df[sorted_df.cluster_members > (cluster_size_mean + cluster_size_SD)]
+
+        print('Selected clusters:')
+        pprint.pprint(selected_cluster_rows)
+
+        with open(motif_yaml_path, 'a') as motif_yaml:
+            motif_yaml.write('{}:\n'.format(current_fragment))
+            for index, row in selected_cluster_rows.iterrows():
+                motif_yaml.write('- {}\n'.format(int(row['cluster_index'])))
 
 class fragment_PDB():
     """
@@ -253,6 +265,7 @@ class fragment_PDB():
             h_bond_donor_acceptor = 1 if self.residue_contact_atom.getResnames()[0] in ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'ARG', 'SER', 'THR', 'TYR'] else 0
 
             # Residue characteristics
+            # todo: UPDATE so that only one of the below can hold value of 1 at any given time
             # {0 | 1} - Hydrophobic, aliphatic(AILV)
             greasy_ali = 1 if self.residue_contact_atom.getResnames()[0] in ['ALA', 'ILE', 'LEU', 'VAL'] else 0
             # {0 | 1} - Hydrophobic, aromatic(FWY)
