@@ -27,26 +27,21 @@ class Generate_Constraints():
         self.single_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', 'Single_Poses')
         self.res_idx_map_df = pd.read_csv(os.path.join(self.single_pose_dir, 'residue_index_mapping.csv'))
 
-    def determine_constraint_atoms(self, single_pose_path, current_residue_index, verbose=True):
+    def determine_constraint_atoms(self, single_pose_prody, current_conformer, current_residue_index, verbose=True):
         """
         Determine the three atoms in the ligand and the residue that will be used to calculate ideal values for the DOFs
         required for matcher. 
         
-        :param single_pose_path: path to single pose for current conformer
+        :param single_pose_prody: prody object of single pose for current conformer
+        :param current_conformer: name of current conformer e.g. MEH_0001
         :param current_residue_index: residue number for current residue in single pose
         :return: 
         """
         ligand_code = os.path.normpath(os.path.basename(self.user_defined_dir))
-        current_conformer = os.path.basename(os.path.normpath(single_pose_path)).split('-')[0]
-
         residue_index_row = self.res_idx_map_df.loc[(self.res_idx_map_df['residue_index'] == current_residue_index) &
                                                     (self.res_idx_map_df['source_conformer'] == current_conformer)]
-        print(residue_index_row)
+
         # Get residue prody
-        single_pose_prody = prody.parsePDB(single_pose_path)
-
-        print(single_pose_prody.getHierView().numResidues())
-
         residue_prody = single_pose_prody.select('resnum {}'.format(current_residue_index)).copy()
 
         # Get conformer prody
@@ -71,6 +66,7 @@ class Generate_Constraints():
         prody.writePDBStream(residue_io, residue_prody)
 
         residue_split = re.split('-|\.', residue_index_row['source_pdb'].values[0])
+        residue_index = residue_split[0]
         fragment = residue_split[2]
         cluster = residue_split[3]
         resname = residue_split[5]
@@ -89,9 +85,6 @@ class Generate_Constraints():
         fragment_atom_names = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(fragment))).getNames()
         conformer_fragment_atoms = single_pose_prody.select('resname {} and name {}'.format(ligand_code, ' '.join(fragment_atom_names)))
 
-        print(conformer_fragment_atoms)
-        print(fragment_atom_names)
-
         contact_distance, residue_index_low, ligand_index_low = minimum_contact_distance(residue_prody, conformer_fragment_atoms, return_indices=True)
 
         # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
@@ -104,31 +97,25 @@ class Generate_Constraints():
         residue_contact_atom = residue_atom_list[residue_index_low]
         ligand_contact_atom = ligand_atom_list[ligand_index_low]
 
-        print(residue_contact_atom)
-        print(ligand_contact_atom)
-
-        residue_first_atom = residue_contact_atom.getIndex()
-        ligand_first_atom = ligand_contact_atom.getIndex()
-
         # Okay, now the hard part: selecting two additional atoms downstream from the contact atoms for meaningful constraints... programmatically...
         # Using RDKit to determine neighboring atoms, removes Hydrogens by default
 
         # RESIDUE CONSTRAINT ATOM INDICES
         # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
         if residue_contact_atom.getName() in ['C', 'CA', 'CB', 'N', 'O']:
-            if residue_contact_atom.getName()[0] == 'CB':
+            if residue_contact_atom.getName() == 'CB':
                 residue_second_atom = residue_atom_index_map['CA']
                 residue_third_atom = residue_atom_index_map['C']
-            elif residue_contact_atom.getName()[0] == 'O':
+            elif residue_contact_atom.getName() == 'O':
                 residue_second_atom = residue_atom_index_map['C']
                 residue_third_atom = residue_atom_index_map['CA']
-            elif residue_contact_atom.getName()[0] == 'N':
+            elif residue_contact_atom.getName() == 'N':
                 residue_second_atom = residue_atom_index_map['CA']
                 residue_third_atom = residue_atom_index_map['C']
-            elif residue_contact_atom.getName()[0] == 'C':
+            elif residue_contact_atom.getName() == 'C':
                 residue_second_atom = residue_atom_index_map['CA']
                 residue_third_atom = residue_atom_index_map['N']
-            elif residue_contact_atom.getName()[0] == 'CA':
+            elif residue_contact_atom.getName() == 'CA':
                 residue_second_atom = residue_atom_index_map['C']
                 residue_third_atom = residue_atom_index_map['O']
             else:
@@ -138,7 +125,12 @@ class Generate_Constraints():
             residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
             residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
 
+        ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, fragment_source_conformer)
+
         if verbose:
+            print(current_conformer)
+            print(residue_index_row['source_pdb'].values[0])
+
             # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
             # necessarily correspond to residue/ligand atom indicies... just happened to work for residues since most
             # of them have hydrogens stripped already
@@ -156,11 +148,33 @@ class Generate_Constraints():
             # This shouldn't be a huge issue since I generate all of the transformed ligand-residue contacts
             # Just need to consider the conformer when I concat complete constraint files together
 
-            ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, fragment_source_conformer)
-
             print('LIGAND - FIRST ATOM: {} {}'.format(ligand_contact_atom.getIndex(), ligand_index_atom_map[ligand_contact_atom.getIndex()]))
             print('LIGAND - SECOND ATOM: {} {}'.format(ligand_second_atom, ligand_index_atom_map[ligand_second_atom]))
             print('LIGAND - THIRD ATOM: {} {}'.format(ligand_third_atom, ligand_index_atom_map[ligand_third_atom]))
+
+        return {'source_pdb': residue_index_row['source_pdb'].values[0],
+                'residue_index': residue_index,
+                'fragment': fragment,
+                'cluster': cluster,
+                'resname': resname,
+                'contact_distance': float(contact_distance),
+                'ligand': {'atom_names': [ligand_index_atom_map[ligand_contact_atom.getIndex()],
+                                          ligand_index_atom_map[ligand_second_atom],
+                                          ligand_index_atom_map[ligand_third_atom]
+                                          ],
+                           'atom_indices': [ligand_contact_atom.getIndex(),
+                                            ligand_second_atom,
+                                            ligand_third_atom]
+                           },
+                'residue': {'atom_names': [residue_index_atom_map[residue_contact_atom.getIndex()],
+                                           residue_index_atom_map[residue_second_atom],
+                                           residue_index_atom_map[residue_third_atom]
+                                           ],
+                            'atom_indices': [residue_contact_atom.getIndex(),
+                                             residue_second_atom,
+                                             residue_third_atom]
+                            }
+                }
 
     def _determine_next_residue_constraint_atom(self, current_atom_index, RD_residue, residue_prody):
         """
@@ -228,214 +242,223 @@ class Generate_Constraints():
 
                         return ligand_second_atom, ligand_third_atom
 
-
-    def generate_residue_ligand_constraints(self, distance_tolerance_d=0.5, angle_A_tolerance_d=10,
-                                            angle_B_tolerance_d=10, torsion_A_tolerance_d=10, torsion_AB_tolerance_d=10,
-                                            torsion_B_tolerance_d=10, torsion_constraint_sample_number=2,
-                                            angle_constraint_sample_number=2, distance_constraint_sample_number=0,
-                                            use_default_tolerances=False):
+    def generate_residue_ligand_constraints(self):
         """
         Generate matcher constraint for a given residue-ligand interaction using information from clusters
         res1 = residue
         res2 = ligand
         :return: 
         """
-        # todo: update to generate constraints for all conformers
-        ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
-
-        # Get dict of all representative residue filenames
-        representative_residue_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')
-        representative_residue_info = {filename.split('-')[0]: filename for filename in
-                                       pdb_check(representative_residue_dir, base_only=True)}
-
-        # # For each directory in Residue_Ligand_Interactions
-        # for source_conformer in directory_check(self.residue_ligand_interactions_dir):
-        #     print('\n\n{}'.format(source_conformer))
-        #
-        #     # For each pdb of a transformed residue-conformer interaction
-        #     for conformer_residue_pdb in pdb_check(source_conformer, base_only=True):
 
         # For each conformer and all of its associated motif residues...
         for single_pose_pdb_path in pdb_check(self.single_pose_dir):
             single_pose_prody = prody.parsePDB(single_pose_pdb_path)
+            current_conformer = os.path.basename(os.path.normpath(single_pose_pdb_path)).split('-')[0]
 
             # For each motif residue...
             # todo: this will need to be updated once we start thinking about DNA/RNA interactions
             for residue_index in range(2, single_pose_prody.getHierView().numResidues()):
-                constraint_atom_dict = self.determine_constraint_atoms(single_pose_pdb_path, residue_index)
-
-                # Import residues from clusters
-                cluster_residue_prody_list = []
-                fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results', fragment)
-
-                for cluster_residue in pdb_check(fragment_cluster_path, base_only=True):
-                    if cluster_residue.split('-')[0] == cluster:
-                        cluster_residue_prody = prody.parsePDB(os.path.join(fragment_cluster_path, cluster_residue))
-                        residue_type = cluster_residue_prody.getResnames()[0]
-
-                        # Need to filter for residues with missing atoms...
-                        if residue_type == resname and cluster_residue_prody.numAtoms() == self.expected_atoms[
-                            residue_type]:
-                            cluster_residue_prody_list.append(cluster_residue_prody)
-
-                #########################################################################################
-                # Get ideal distance, angle, and torsion values from representative motif residue prody #
-                #########################################################################################
-
-                ideal_distance = float(contact_distance)
-                # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                ideal_angle_A = prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                                fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                                residue_prody.select('index {}'.format(residue_first_atom))
-                                                )
-                # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                ideal_angle_B = prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                                residue_prody.select('index {}'.format(residue_first_atom)),
-                                                residue_prody.select('index {}'.format(residue_second_atom))
-                                                )
-                # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                ideal_torsion_A = prody.calcDihedral(
-                    fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
-                    fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                    fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                    residue_prody.select('index {}'.format(residue_first_atom))
-                    )
-                # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                ideal_torsion_AB = prody.calcDihedral(
-                    fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                    fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                    residue_prody.select('index {}'.format(residue_first_atom)),
-                    residue_prody.select('index {}'.format(residue_second_atom))
-                    )
-                ideal_torsion_B = prody.calcDihedral(
-                    fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                    residue_prody.select('index {}'.format(residue_first_atom)),
-                    residue_prody.select('index {}'.format(residue_second_atom)),
-                    residue_prody.select('index {}'.format(residue_third_atom))
-                    )
-
-                #################################################################################################
-                # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values #
-                #################################################################################################
-
-                if len(cluster_residue_prody_list) > 3 and use_default_tolerances == False:
-                    distance_list = [
-                        prody.calcDistance(fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                           motif.select('index {}'.format(residue_first_atom)))
-                        for motif in cluster_residue_prody_list]
-                    distance_tolerance_SD = np.std(distance_list)
-
-                    # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                    angle_A_list = [
-                        prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                        fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                        motif.select('index {}'.format(residue_first_atom)))
-                        for motif in cluster_residue_prody_list]
-                    angle_A_tolerance_SD = np.std(angle_A_list)
-
-                    # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                    angle_B_list = [
-                        prody.calcAngle(fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                        motif.select('index {}'.format(residue_first_atom)),
-                                        motif.select('index {}'.format(residue_second_atom)))
-                        for motif in cluster_residue_prody_list]
-                    angle_B_tolerance_SD = np.std(angle_B_list)
-
-                    # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                    torsion_A_list = [
-                        prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_third_atom)),
-                                           fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                           fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                           motif.select('index {}'.format(residue_first_atom)),
-                                           ) for motif in cluster_residue_prody_list]
-                    torsion_A_tolerance_SD = np.std(torsion_A_list)
-
-                    # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                    torsion_AB_list = [
-                        prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_second_atom)),
-                                           fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                           motif.select('index {}'.format(residue_first_atom)),
-                                           motif.select('index {}'.format(residue_second_atom)),
-                                           ) for motif in cluster_residue_prody_list]
-                    torsion_AB_tolerance_SD = np.std(torsion_AB_list)
-
-                    # 'torsion_B' is the dihedral Res1:Atom1 - Res2:Atom1 - Res2:Atom2 - Res2:Atom3
-                    torsion_B_list = [
-                        prody.calcDihedral(fragment_source_conformer.select('index {}'.format(ligand_first_atom)),
-                                           motif.select('index {}'.format(residue_first_atom)),
-                                           motif.select('index {}'.format(residue_second_atom)),
-                                           motif.select('index {}'.format(residue_third_atom)),
-                                           ) for motif in cluster_residue_prody_list]
-                    torsion_B_tolerance_SD = np.std(torsion_B_list)
-
-                    # Set lower and upper bounds for tolerances
-                    distance_tolerance = 0.5 if distance_tolerance_SD > 0.5 else distance_tolerance_SD
-                    angle_A_tolerance = (360 / (
-                    2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_A_tolerance_SD > 120 else angle_A_tolerance_SD
-                    angle_B_tolerance = (360 / (
-                    2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_B_tolerance_SD > 120 else angle_B_tolerance_SD
-                    torsion_A_tolerance = (360 / (
-                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_A_tolerance_SD > 120 else torsion_A_tolerance_SD
-                    torsion_B_tolerance = (360 / (
-                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_B_tolerance_SD > 120 else torsion_B_tolerance_SD
-                    torsion_AB_tolerance = (360 / (
-                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_AB_tolerance_SD > 120 else torsion_AB_tolerance_SD
-
-                else:
-                    distance_tolerance = distance_tolerance_d
-                    angle_A_tolerance = angle_A_tolerance_d
-                    angle_B_tolerance = angle_B_tolerance_d
-                    torsion_A_tolerance = torsion_A_tolerance_d
-                    torsion_AB_tolerance = torsion_AB_tolerance_d
-                    torsion_B_tolerance = torsion_B_tolerance_d
-
-                residue_resname = residue_prody.getResnames()[0]
-                ligand_resname = fragment_source_conformer.getResnames()[0]
-
-                constraint_block = ['  TEMPLATE::   ATOM_MAP: 1 atom_name: {} {} {}'.format(
-                    fragment_source_conformer.select('index {}'.format(ligand_contact_atom.getIndex())).getNames()[0],
-                    fragment_source_conformer.select('index {}'.format(ligand_second_atom)).getNames()[0],
-                    fragment_source_conformer.select('index {}'.format(ligand_third_atom)).getNames()[0]
-                    ),
-                                    '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(ligand_resname),
-                                    '  TEMPLATE::   ATOM_MAP: 2 atom_name: {} {} {}'.format(residue_prody.select(
-                                        'index {}'.format(residue_contact_atom.getIndex())).getNames()[0],
-                                                                                            residue_prody.select(
-                                                                                                'index {}'.format(
-                                                                                                    residue_second_atom)).getNames()[
-                                                                                                0],
-                                                                                            residue_prody.select(
-                                                                                                'index {}'.format(
-                                                                                                    residue_third_atom)).getNames()[
-                                                                                                0]
-                                                                                            ),
-                                    '  TEMPLATE::   ATOM_MAP: 2 residue3: {}\n'.format(residue_resname),
-                                    '  CONSTRAINT:: distanceAB: {0:7.2f} {1:6.2f} {2:6.2f}       0  {3:3}'.format(
-                                        ideal_distance, distance_tolerance, 100, distance_constraint_sample_number),
-                                    '  CONSTRAINT::    angle_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
-                                        float(ideal_angle_A), angle_A_tolerance, 100, angle_constraint_sample_number),
-                                    '  CONSTRAINT::    angle_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
-                                        float(ideal_angle_B), angle_B_tolerance, 100, angle_constraint_sample_number),
-                                    '  CONSTRAINT::  torsion_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
-                                        float(ideal_torsion_A), torsion_A_tolerance, 100,
-                                        torsion_constraint_sample_number),
-                                    '  CONSTRAINT::  torsion_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
-                                        float(ideal_torsion_B), torsion_B_tolerance, 100,
-                                        torsion_constraint_sample_number),
-                                    '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
-                                        float(ideal_torsion_AB), torsion_AB_tolerance, 100,
-                                        torsion_constraint_sample_number)
-                                    ]
 
                 single_constraint_path = os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints')
                 os.makedirs(single_constraint_path, exist_ok=True)
 
+                constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(single_pose_prody, current_conformer, residue_index)
+
                 with open(os.path.join(single_constraint_path,
-                                       '{}-{}.cst'.format(os.path.basename(os.path.normpath(source_conformer)),
-                                                          residue_index)), 'w') as constraint_file:
+                                       '{}-{}.cst'.format(os.path.basename(os.path.normpath(current_conformer)),
+                                                          constraint_atoms_dict['residue_index'])),
+                          'w') as constraint_file:
                     constraint_file.write('\n'.join(constraint_block))
+    
+    def generate_single_constraint_block(self, single_pose_prody, current_conformer, residue_index,
+                                         distance_tolerance_d=0.5, angle_A_tolerance_d=5, angle_B_tolerance_d=5,
+                                         torsion_A_tolerance_d=5, torsion_AB_tolerance_d=5, torsion_B_tolerance_d=5,
+                                         torsion_constraint_sample_number=1, angle_constraint_sample_number=1,
+                                         distance_constraint_sample_number=0, use_default_tolerances=True):
+        """
+        Generate a single constraint block for one residue-ligand interaction
+        :return: 
+        """
+        constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, residue_index)
+        ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
+        ligand_prody = single_pose_prody.select('resname {}'.format(ligand)).copy()
+        residue_prody = single_pose_prody.select('resnum {}'.format(residue_index)).copy()
 
+        #########################################################################################
+        # Get ideal distance, angle, and torsion values from representative motif residue prody #
+        #########################################################################################
 
+        ideal_distance = constraint_atoms_dict['contact_distance']
+        # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+        ideal_angle_A = prody.calcAngle(
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0]))
+            )
+        # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+        ideal_angle_B = prody.calcAngle(
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1]))
+            )
+        # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+        ideal_torsion_A = prody.calcDihedral(
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][2])),
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0]))
+        )
+        # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+        ideal_torsion_AB = prody.calcDihedral(
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1]))
+        )
+        ideal_torsion_B = prody.calcDihedral(
+            ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1])),
+            residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][2]))
+        )
+
+        if use_default_tolerances == False:
+            # todo: get rid of this, imminently obsolete
+            ##########################################################
+            # Import cluster residues for cluster-derived tolerances #
+            ##########################################################
+
+            # Import residues from clusters
+            cluster_residue_prody_list = []
+            fragment_cluster_path = os.path.join(self.user_defined_dir, 'Cluster_Results',
+                                                 constraint_atoms_dict['fragment'])
+
+            for cluster_residue in pdb_check(fragment_cluster_path, base_only=True):
+                if cluster_residue.split('-')[0] == constraint_atoms_dict['cluster']:
+                    cluster_residue_prody = prody.parsePDB(os.path.join(fragment_cluster_path, cluster_residue))
+                    residue_type = cluster_residue_prody.getResnames()[0]
+
+                    # Need to filter for residues with missing atoms...
+                    if residue_type == constraint_atoms_dict['resname'] and cluster_residue_prody.numAtoms() == \
+                            self.expected_atoms[residue_type]:
+                        cluster_residue_prody_list.append(cluster_residue_prody)
+
+            #################################################################################################
+            # Get tolerance from clusters; I'm going to try making the tolerance +/- 1 SD of cluster values #
+            #################################################################################################
+
+            if len(cluster_residue_prody_list) > 3:
+                distance_list = [
+                    prody.calcDistance(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])))
+                    for motif in cluster_residue_prody_list]
+                distance_tolerance_SD = np.std(distance_list)
+
+                # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+                angle_A_list = [
+                    prody.calcAngle(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])))
+                    for motif in cluster_residue_prody_list]
+                angle_A_tolerance_SD = np.std(angle_A_list)
+
+                # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+                angle_B_list = [
+                    prody.calcAngle(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1])))
+                    for motif in cluster_residue_prody_list]
+                angle_B_tolerance_SD = np.std(angle_B_list)
+
+                # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
+                torsion_A_list = [
+                    prody.calcDihedral(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][2])),
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+                        ) for motif in cluster_residue_prody_list]
+                torsion_A_tolerance_SD = np.std(torsion_A_list)
+
+                # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
+                torsion_AB_list = [
+                    prody.calcDihedral(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][1])),
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1])),
+                        ) for motif in cluster_residue_prody_list]
+                torsion_AB_tolerance_SD = np.std(torsion_AB_list)
+
+                # 'torsion_B' is the dihedral Res1:Atom1 - Res2:Atom1 - Res2:Atom2 - Res2:Atom3
+                torsion_B_list = [
+                    prody.calcDihedral(
+                        ligand_prody.select('index {}'.format(constraint_atoms_dict['ligand']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][0])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1])),
+                        motif.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][2])),
+                        ) for motif in cluster_residue_prody_list]
+                torsion_B_tolerance_SD = np.std(torsion_B_list)
+
+                # Set lower and upper bounds for tolerances
+                distance_tolerance = 0.5 if distance_tolerance_SD > 0.5 else distance_tolerance_SD
+                angle_A_tolerance = (360 / (
+                    2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_A_tolerance_SD > 120 else angle_A_tolerance_SD
+                angle_B_tolerance = (360 / (
+                    2 * angle_constraint_sample_number + 1) * angle_constraint_sample_number) if angle_B_tolerance_SD > 120 else angle_B_tolerance_SD
+                torsion_A_tolerance = (360 / (
+                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_A_tolerance_SD > 120 else torsion_A_tolerance_SD
+                torsion_B_tolerance = (360 / (
+                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_B_tolerance_SD > 120 else torsion_B_tolerance_SD
+                torsion_AB_tolerance = (360 / (
+                    2 * torsion_constraint_sample_number + 1) * torsion_constraint_sample_number) if torsion_AB_tolerance_SD > 120 else torsion_AB_tolerance_SD
+
+            else:
+                distance_tolerance = distance_tolerance_d
+                angle_A_tolerance = angle_A_tolerance_d
+                angle_B_tolerance = angle_B_tolerance_d
+                torsion_A_tolerance = torsion_A_tolerance_d
+                torsion_AB_tolerance = torsion_AB_tolerance_d
+                torsion_B_tolerance = torsion_B_tolerance_d
+
+        else:
+            distance_tolerance = distance_tolerance_d
+            angle_A_tolerance = angle_A_tolerance_d
+            angle_B_tolerance = angle_B_tolerance_d
+            torsion_A_tolerance = torsion_A_tolerance_d
+            torsion_AB_tolerance = torsion_AB_tolerance_d
+            torsion_B_tolerance = torsion_B_tolerance_d
+
+        residue_resname = residue_prody.getResnames()[0]
+        ligand_resname = ligand_prody.getResnames()[0]
+
+        constraint_block = [
+            '  TEMPLATE::   ATOM_MAP: 1 atom_name: {}'.format(' '.join(constraint_atoms_dict['ligand']['atom_names'])),
+            '  TEMPLATE::   ATOM_MAP: 1 residue3: {}\n'.format(ligand_resname),
+            '  TEMPLATE::   ATOM_MAP: 2 atom_name: {}'.format(' '.join(constraint_atoms_dict['residue']['atom_names'])),
+            '  TEMPLATE::   ATOM_MAP: 2 residue3: {}\n'.format(residue_resname),
+            '  CONSTRAINT:: distanceAB: {0:7.2f} {1:6.2f} {2:6.2f}       0  {3:3}'.format(
+                ideal_distance, distance_tolerance, 100, distance_constraint_sample_number),
+            '  CONSTRAINT::    angle_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
+                float(ideal_angle_A), angle_A_tolerance, 100, angle_constraint_sample_number),
+            '  CONSTRAINT::    angle_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
+                float(ideal_angle_B), angle_B_tolerance, 100, angle_constraint_sample_number),
+            '  CONSTRAINT::  torsion_A: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
+                float(ideal_torsion_A), torsion_A_tolerance, 100,
+                torsion_constraint_sample_number),
+            '  CONSTRAINT::  torsion_B: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
+                float(ideal_torsion_B), torsion_B_tolerance, 100,
+                torsion_constraint_sample_number),
+            '  CONSTRAINT:: torsion_AB: {0:7.2f} {1:6.2f} {2:6.2f}  360.00  {3:3}'.format(
+                float(ideal_torsion_AB), torsion_AB_tolerance, 100,
+                torsion_constraint_sample_number)
+            ]
+        
+        return constraint_atoms_dict, constraint_block
+    
     def define_second_shell_contraints(self):
         """
         Identify second shell contacts with motif residues
@@ -466,7 +489,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         :param motif_cluster_yaml: 
         :param generate_single_pose: Generate a single pose containing ligand and all motif residues?
         """
-        Generate_Constraints.__init__(user_defined_dir)
+        Generate_Constraints.__init__(self, user_defined_dir)
         self.user_defined_dir = user_defined_dir
         self.fragment_cluster_list = motif_cluster_yaml
         self.motif_residue_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')
@@ -598,14 +621,14 @@ class Generate_Motif_Residues(Generate_Constraints):
         self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
 
         # Generate poses for representative residues only
-        self.generate_residue_residue_clash_matrix()
+        # self.generate_residue_residue_clash_matrix(actually_generate_matrix=False)
 
         # Generate poses for all cluster residues
         # self.generate_single_pose_from_selected_clusters()
 
         # self.generate_residue_ligand_clash_list()
         # self.score_residue_ligand_interactions()
-        # self.generate_residue_ligand_constraints(torsion_constraint_sample_number=1, angle_constraint_sample_number=1, distance_constraint_sample_number=0)
+        self.generate_residue_ligand_constraints()
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
