@@ -10,6 +10,7 @@ import pprint
 import yaml
 import io
 import re
+import shutil
 import copy
 import itertools
 import subprocess
@@ -25,10 +26,11 @@ class Generate_Constraints():
     def __init__(self, user_defined_dir):
         self.user_defined_dir = user_defined_dir
         self.single_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', 'Single_Poses')
+        self.reference_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose')
         self.res_idx_map_df = False
 
     def import_res_idx_map(self):
-        self.res_idx_map_df = pd.read_csv(os.path.join(self.single_pose_dir, 'residue_index_mapping.csv'))
+        self.res_idx_map_df = pd.read_csv(os.path.join(self.reference_pose_dir, 'residue_index_mapping.csv'))
 
     def determine_constraint_atoms(self, single_pose_prody, current_conformer, current_residue_index, verbose=True):
         """
@@ -76,8 +78,6 @@ class Generate_Constraints():
         # Write residue_prody to StringIO. This is required to select neighbor atoms in _determine_next_residue_constraint_atom()
         residue_io = io.StringIO()
         prody.writePDBStream(residue_io, residue_prody)
-
-
 
         RD_residue = Chem.MolFromPDBBlock(residue_io.getvalue(), removeHs=True)
         RD_ligand = Chem.MolFromPDBBlock(open(fragment_source_conformer_path, 'r').read(), removeHs=True)  # Trouble?
@@ -244,8 +244,7 @@ class Generate_Constraints():
                     common_two_three = third_atom_neighbors_set & second_atom_neighbors_set
 
                     # Only investigate potential third constraint atoms with more than one neighbor, not including second atom
-                    if len(
-                                    third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
+                    if len(third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
                         ligand_second_atom = second_atom.GetIdx()
                         ligand_third_atom = third_atom.GetIdx()
 
@@ -627,10 +626,15 @@ class Generate_Motif_Residues(Generate_Constraints):
         :return: 
         """
         os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-        self.conformer_transformation_dict = self.transform_motif_residues_onto_fragments()
+
+        # Generate transformation dict
+        # todo: I NEED AN ADDITIONAL LIGAND ATOM TO CALCULATE TRANSFORMATIONS
+        # use residue contact atoms??? verify atom selections are robust, same order and everything
+        self.conformer_transformation_dict = self.generate_motif_transformation_dict()
 
         # Generate poses for representative residues only
-        # self.generate_residue_residue_clash_matrix(actually_generate_matrix=False)
+        self.generate_residue_residue_clash_matrix(actually_generate_matrix=False)
+        self.import_res_idx_map()
 
         # Generate poses for all cluster residues
         # self.generate_single_pose_from_selected_clusters()
@@ -685,39 +689,123 @@ class Generate_Motif_Residues(Generate_Constraints):
         motif_residue_list = []
         if os.path.exists(self.motif_residue_dir):
             for representative_residue in pdb_check(self.motif_residue_dir, base_only=True):
-                motif_residue_list.append(representative_residue,
+                motif_residue_list.append((representative_residue,
                                           prody.parsePDB(os.path.join(self.motif_residue_dir, representative_residue))
+                                           )
                                           )
             conformer = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', '{}_0001.pdb'.format(ligand_code))
-            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=False, add_to_csv=False)
+            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True, generate_reference_pose=True)
 
         else:
-            self.generate_single_pose_from_selected_clusters(first_only=True)
+            self.generate_single_pose_from_selected_clusters(generate_reference_pose=True)
 
         # Import residue_index_map after generating the first single pose
         self.import_res_idx_map()
 
-        # Use single pose to determine constraint atoms for each motif residue
-        single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, 'Single_Poses')
+        # reference_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose')
+        # self.res_idx_map_df = pd.read_csv(os.path.join(reference_pose_dir, 'residue_index_mapping.csv'))
 
-        assert len(os.listdir(single_pose_dir)) == 3
-
-        for single_pose_path in pdb_check(single_pose_dir):
+        # Use single pose to determine constraint atoms for each motif residue, add to dict
+        ligand_constraint_atoms_dict = {}
+        for single_pose_path in pdb_check(self.reference_pose_dir):
             single_pose_prody = prody.parsePDB(single_pose_path)
             single_pose_hv = single_pose_prody.getHierView()
+            ligand_prody = single_pose_prody.select('resname {}'.format(ligand_code))
 
             current_conformer = os.path.basename(os.path.normpath(single_pose_path)).split('-')[0]
             conformer_transformation_dict[current_conformer] = {}
 
             for motif_residue in single_pose_hv.iterResidues():
                 if motif_residue.getResname() != ligand_code:
-                    constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, motif_residue.getResnum())
-                    pprint.pprint(constraint_atoms_dict)
+                    constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, motif_residue.getResnum(), verbose=False)
+                    ligand_constraint_atoms_dict[motif_residue.getResnum()] = constraint_atoms_dict['ligand']['atom_names']
+            break # Redundant
 
-            break
+        # Generate conformer_transformation_dict
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+            conformer_transformation_dict[conformer_name] = {}
+            conformer_prody = prody.parsePDB(conformer)
 
-        # todo: REMEBER TO DELETE SINGLE POSE DIR AND EVERYTHING IN IT AFTER DETERMINING TRANSFORMATIONS
+            for key, value in ligand_constraint_atoms_dict.items():
+                print(key, value)
 
+                # Select atoms from reference ligand conformer (conformer #1 e.g. MEH_0001)
+                reference_conformer_atoms = ligand_prody.select('name {}'.format(' '.join(ligand_constraint_atoms_dict[key]))).getCoords()
+
+                # reference_conformer_atoms = np.asarray([ligand_prody.select('name {}'.format(atom)).getCoords()[0] for atom in ligand_constraint_atoms_dict[key]])
+                # print(reference_conformer_atoms.getCoords())
+                # print(reference_conformer_atoms)
+
+                # Select atoms from current conformer
+                target_conformer_atoms = conformer_prody.select('name {}'.format(' '.join(ligand_constraint_atoms_dict[key]))).getCoords()
+
+                # target_conformer_atoms = np.asarray([conformer_prody.select('name {}'.format(atom)).getCoords()[0] for atom in ligand_constraint_atoms_dict[key]])
+                # print(target_conformer_atoms.getCoords())
+                # print(target_conformer_atoms)
+
+                # Calculate transformation matix
+                # transformation = prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms)
+                # transformation = prody.calcTransformation(reference_conformer_atoms.getCoords(), target_conformer_atoms.getCoords())
+
+                # rotation_matrix = prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getRotation()
+                # det = np.linalg.det(rotation_matrix)
+
+                # Calculate rotation and translation by hand...
+                ref_centroid = reference_conformer_atoms.mean(0)[np.newaxis]
+                tgt_centroid = target_conformer_atoms.mean(0)[np.newaxis]
+
+                # print('CONFORMER ATOMS')
+                # print(reference_conformer_atoms)
+                # print(target_conformer_atoms)
+                #
+                # print('CENTROIDS')
+                # print(ref_centroid)
+                # print(tgt_centroid)
+
+                covariance_matrix = sum([np.dot((a[np.newaxis] - tgt_centroid).T, (b[np.newaxis] - ref_centroid))
+                                         for a,b in zip(target_conformer_atoms, reference_conformer_atoms)])
+
+                # print('COVAR MATRIX')
+                # print(covariance_matrix)
+
+                U, s, V = np.linalg.svd(covariance_matrix, full_matrices=True)
+                det = np.linalg.det(np.dot(V.T, U.T))
+                rotation_matrix_hand = np.dot(np.dot(V.T, np.asarray([[1,0,0],[0,1,0],[0,0,det]])), U.T)
+
+                # print('HANDY ROTATION MATRIX')
+                # print(rotation_matrix_hand)
+                #
+                # print('PRODY ROTATION MATRIX')
+                # print(rotation_matrix)
+
+                # Translation
+                translation_vector_hand = np.dot(-rotation_matrix_hand, tgt_centroid.T) + ref_centroid.T
+
+                # print('HANDY TRANSLATION MATRIX')
+                # print(translation_vector_hand)
+                # print('PRODY TRANSLATION MATRIX')
+                # print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getTranslation())
+
+                # if det < 0:
+                #     # print(np.asarray([[1,0,0],[0,1,0],[0,0,-1]]))
+                #     # print('Before:')
+                #     # print(rotation_matrix)
+                #     rotation_matrix = np.dot(rotation_matrix, np.asarray([[1,0,0],[0,1,0],[0,0,-1]]))
+                #     # print('After:')
+                #     # print(rotation_matrix)
+                #     transformation.setRotation(rotation_matrix)
+
+                transformation = prody.Transformation(rotation_matrix_hand, translation_vector_hand.T[0])
+                # print(transformation.getMatrix())
+                # print(transformation.getRotation())
+                # print(transformation.getTranslation())
+
+                conformer_transformation_dict[conformer_name][key] = transformation
+
+        return conformer_transformation_dict
+
+    # DEPRECIATED
     def transform_motif_residues_onto_fragments(self):
         """
         Exactly what is says!
@@ -797,6 +885,9 @@ class Generate_Motif_Residues(Generate_Constraints):
         # touch text file to keep track of paths for PDBs to score
         open(self.score_interactions_list_path, 'w').close()
 
+        # Import residue_index_mapping for reference pose
+        residue_index_mapping_df = pd.read_csv(os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose', 'residue_index_mapping.csv'))
+
         # Okay so for the actually residue-residue clashing stuff for each conformer
         # For each conformer I want to determine motif clashes with...
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
@@ -807,19 +898,20 @@ class Generate_Motif_Residues(Generate_Constraints):
             motif_residue_list = []
             for motif_residue in pdb_check(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')):
 
-                # Parse file name to get fragment, import prody
                 motif_prody = prody.parsePDB(motif_residue)
-                motif_filename = os.path.basename(os.path.normpath(motif_residue)).split('.')[0]
-                motif_source_fragment = motif_filename.split('-')[2]
+
+                # Get residue index from residue_index_mapping_df
+                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))]
+                residue_index = residue_index_row['residue_index'].values[0]
 
                 # Get translation and rotation for fragment onto conformer
-                transformation_matrix = self.conformer_transformation_dict[conformer_name][motif_source_fragment]
+                transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
 
                 transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
-                motif_residue_list.append((motif_filename, transformed_motif))
+                motif_residue_list.append((os.path.basename(os.path.normpath(motif_residue)), transformed_motif))
 
             # Generate residue-conformer PDBs for scoring here so I don't have to regenerate the transformed residues...
-            self.generate_residue_ligand_pdbs(conformer, motif_residue_list)
+            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=True, generate_single_pose=True, generate_reference_pose=False)
 
             if actually_generate_matrix == True:
                 residue_residue_clash_set = set()
@@ -839,7 +931,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         if actually_generate_matrix == True:
             yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
 
-    def generate_residue_ligand_pdbs(self, conformer, motif_residue_list, generate_residue_ligand_pairs=True, generate_single_pose=True, add_to_csv=True):
+    def generate_residue_ligand_pdbs(self, conformer, motif_residue_list, generate_residue_ligand_pairs=False, generate_single_pose=False, generate_reference_pose=False):
         """
         Generate residue-ligand PDBs used for scoring
         :param conformer: path to pdb of conformer
@@ -871,9 +963,13 @@ class Generate_Motif_Residues(Generate_Constraints):
         # Generate single pose of ligand and all motif residues if option is turned on (default)
         if generate_single_pose == True:
 
-            # Make a convenient directory
-            single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
-            os.makedirs(single_pose_dir, exist_ok=True)
+            # Make a convenient directories
+            if generate_reference_pose:
+                # reference_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose')
+                os.makedirs(self.reference_pose_dir, exist_ok=True)
+            else:
+                single_pose_dir = os.path.join(self.residue_ligand_interactions_dir, "Single_Poses")
+                os.makedirs(single_pose_dir, exist_ok=True)
 
             # # Touch file for list of single_pose paths
             # open(os.path.join(single_pose_dir, 'single_pose_list.txt'), 'w').close()
@@ -910,12 +1006,21 @@ class Generate_Motif_Residues(Generate_Constraints):
                 conformer_single_pose = conformer_single_pose + residue_prody
                 residue_count += 1
 
+
             # Output residue explosion to it's own happy directory under Inputs
-            pdb_output_path = os.path.join(single_pose_dir, '{}-single_pose.pdb'.format(ligand_ID))
+            if generate_reference_pose == True:
+                pdb_output_path = os.path.join(self.reference_pose_dir, '{}-single_pose.pdb'.format(ligand_ID))
+            else:
+                pdb_output_path = os.path.join(single_pose_dir, '{}-single_pose.pdb'.format(ligand_ID))
             prody.writePDB(pdb_output_path, conformer_single_pose)
 
             # Add residue index to new/existing .csv
-            output_csv_path = os.path.join(single_pose_dir, 'residue_index_mapping.csv')
+            if generate_reference_pose == True:
+                os.makedirs(self.reference_pose_dir, exist_ok=True)
+                output_csv_path = os.path.join(self.reference_pose_dir, 'residue_index_mapping.csv')
+            else:
+                output_csv_path = os.path.join(single_pose_dir, 'residue_index_mapping.csv')
+
             if os.path.exists(output_csv_path):
                 df_existing = pd.read_csv(output_csv_path, index_col=0)
                 df_new = pd.DataFrame(residue_list_of_dicts)
@@ -925,9 +1030,10 @@ class Generate_Motif_Residues(Generate_Constraints):
                 df_new = pd.DataFrame(residue_list_of_dicts)
                 df_new.to_csv(output_csv_path)
 
-            # Add PDB path to single_pose list
-            with open(single_pose_list, 'a') as muh_list:
-                muh_list.write(pdb_output_path + '\n')
+            if generate_reference_pose == False:
+                # Add PDB path to single_pose list
+                with open(single_pose_list, 'a') as muh_list:
+                    muh_list.write(pdb_output_path + '\n')
 
     def score_residue_ligand_interactions(self):
         """
@@ -971,7 +1077,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         # Output only necessary scores to a .csv
         score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
 
-    def generate_single_pose_from_selected_clusters(self, first_only=False):
+    def generate_single_pose_from_selected_clusters(self, generate_reference_pose=False):
         """
         20170829 - Now that I have Gurobi up and running, I want to see if I can use all residues from clusters in
         binding motif generation. This will simply take all residues from selected clusters and add them to a single
@@ -1016,7 +1122,7 @@ class Generate_Motif_Residues(Generate_Constraints):
 
                 # Get translation and rotation for fragment onto conformer
                 # todo: fix this...
-                if not first_only:
+                if not generate_reference_pose:
                     transformation_matrix = self.conformer_transformation_dict[conformer_name][dict_fragment]
 
                 for cluster_index in fragment_prody_dict[dict_fragment]:
@@ -1026,18 +1132,18 @@ class Generate_Motif_Residues(Generate_Constraints):
                         deepcopy_residue = copy.deepcopy(cluster_member_tuple[1])
 
                         # todo: fix this as well... so hacky.
-                        if first_only:
+                        if generate_reference_pose:
                             transformed_motif = deepcopy_residue
                         else:
                             transformed_motif = prody.applyTransformation(transformation_matrix, deepcopy_residue)
 
                         motif_residue_list.append((cluster_member_tuple[0], transformed_motif))
 
-            if first_only:
-                self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=False, add_to_csv=False)
+            if generate_reference_pose:
+                self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True, generate_reference_pose=True)
                 break
             else:
-                self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=False)
+                self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True)
 
 
 class Generate_Binding_Sites():
