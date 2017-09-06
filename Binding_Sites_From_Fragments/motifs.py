@@ -30,7 +30,7 @@ class Generate_Constraints():
         self.res_idx_map_df = False
 
     def import_res_idx_map(self):
-        self.res_idx_map_df = pd.read_csv(os.path.join(self.reference_pose_dir, 'residue_index_mapping.csv'))
+        self.res_idx_map_df = pd.read_csv(os.path.join(self.single_pose_dir, 'residue_index_mapping.csv'))
 
     def determine_constraint_atoms(self, single_pose_prody, current_conformer, current_residue_index, verbose=True):
         """
@@ -208,14 +208,18 @@ class Generate_Constraints():
             next_atom_index = residue_contact_atom_neighbors[0]
             return next_atom_index
 
+
         else:
             first_atom_ID = residue_index_atom_map[current_atom_index]
-            second_atom_IDs = [residue_index_atom_map[atom] for atom in residue_contact_atom_neighbors]
+            # Special case for Prolines. CG > N causes issues with atom[1]... is there another fix? Yes. But it's 12am
+            second_atom_IDs = [residue_index_atom_map[atom] for atom in residue_contact_atom_neighbors if len(residue_index_atom_map[atom]) > 1]
 
             for atom in second_atom_IDs:
                 if atom[1] == atom_hierarchy[atom_hierarchy.index(first_atom_ID[1]) + 1]:
                     next_atom_index = residue_atom_index_map[atom]
                     return next_atom_index
+
+            raise Exception('Somehow you\'ve run out of neighbors for your contact atom...')
 
     def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_prody):
         """
@@ -700,10 +704,7 @@ class Generate_Motif_Residues(Generate_Constraints):
             self.generate_single_pose_from_selected_clusters(generate_reference_pose=True)
 
         # Import residue_index_map after generating the first single pose
-        self.import_res_idx_map()
-
-        # reference_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose')
-        # self.res_idx_map_df = pd.read_csv(os.path.join(reference_pose_dir, 'residue_index_mapping.csv'))
+        self.res_idx_map_df = pd.read_csv(os.path.join(self.reference_pose_dir, 'residue_index_mapping.csv'))
 
         # Use single pose to determine constraint atoms for each motif residue, add to dict
         ligand_constraint_atoms_dict = {}
@@ -733,75 +734,71 @@ class Generate_Motif_Residues(Generate_Constraints):
                 # Select atoms from reference ligand conformer (conformer #1 e.g. MEH_0001)
                 reference_conformer_atoms = ligand_prody.select('name {}'.format(' '.join(ligand_constraint_atoms_dict[key]))).getCoords()
 
-                # reference_conformer_atoms = np.asarray([ligand_prody.select('name {}'.format(atom)).getCoords()[0] for atom in ligand_constraint_atoms_dict[key]])
-                # print(reference_conformer_atoms.getCoords())
-                # print(reference_conformer_atoms)
-
                 # Select atoms from current conformer
                 target_conformer_atoms = conformer_prody.select('name {}'.format(' '.join(ligand_constraint_atoms_dict[key]))).getCoords()
 
-                # target_conformer_atoms = np.asarray([conformer_prody.select('name {}'.format(atom)).getCoords()[0] for atom in ligand_constraint_atoms_dict[key]])
-                # print(target_conformer_atoms.getCoords())
-                # print(target_conformer_atoms)
-
-                # Calculate transformation matix
-                # transformation = prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms)
-                # transformation = prody.calcTransformation(reference_conformer_atoms.getCoords(), target_conformer_atoms.getCoords())
-
-                # rotation_matrix = prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getRotation()
-                # det = np.linalg.det(rotation_matrix)
-
-                # Calculate rotation and translation by hand...
-                ref_centroid = reference_conformer_atoms.mean(0)[np.newaxis]
-                tgt_centroid = target_conformer_atoms.mean(0)[np.newaxis]
-
-                # print('CONFORMER ATOMS')
+                # print('SELECTED ATOMS')
                 # print(reference_conformer_atoms)
                 # print(target_conformer_atoms)
-                #
-                # print('CENTROIDS')
-                # print(ref_centroid)
-                # print(tgt_centroid)
 
-                covariance_matrix = sum([np.dot((a[np.newaxis] - tgt_centroid).T, (b[np.newaxis] - ref_centroid))
-                                         for a,b in zip(target_conformer_atoms, reference_conformer_atoms)])
+                # Calculate centroid for selected atoms
+                reference_centroid = np.sum(reference_conformer_atoms, axis=0)/len(reference_conformer_atoms)
+                target_centroid = np.sum(target_conformer_atoms, axis=0)/len(target_conformer_atoms)
 
-                # print('COVAR MATRIX')
-                # print(covariance_matrix)
+                # print('SELECTED CENTROIDS')
+                # print(reference_centroid)
+                # print(target_centroid)
 
-                U, s, V = np.linalg.svd(covariance_matrix, full_matrices=True)
-                det = np.linalg.det(np.dot(V.T, U.T))
-                rotation_matrix_hand = np.dot(np.dot(V.T, np.asarray([[1,0,0],[0,1,0],[0,0,det]])), U.T)
+                # Generate centered coordinate sets
+                reference_centered = np.asarray([atom -  reference_centroid for atom in reference_conformer_atoms])
+                target_centered = np.asarray([atom -  target_centroid for atom in target_conformer_atoms])
 
-                # print('HANDY ROTATION MATRIX')
-                # print(rotation_matrix_hand)
-                #
-                # print('PRODY ROTATION MATRIX')
+                # print('CENTERED COORDINATE SETS')
+                # print(reference_centered)
+                # print(target_centered)
+
+                # Calculate Covariance Matrix
+                # covariance_matrix = np.dot(target_centered.T, reference_centered)
+                covariance_matrix = np.dot(reference_centered.T, target_centered)
+
+                print('COVARIANCE')
+                print(covariance_matrix)
+
+                # Singular Value Decomposition of covariance matrix
+                V, s, Ut = np.linalg.svd(covariance_matrix)
+
+                # Calculate determinant of Ut.T and V.T
+                det = np.linalg.det(np.dot(Ut.T, V.T))
+                det_matrix = np.matrix([[1,0,0],[0,1,0],[0,0,det]])
+
+                # print('DET: {}'.format(det))
+                # print('DET CORRECTION')
+                # print(det_matrix)
+
+                # Calculate Rotation Matrix
+                rotation_matrix = np.dot(np.dot(Ut.T, det_matrix), V.T)
+
+                # print('REFLECTION CORRECTION')
+                # print(V)
+                # print(np.dot(V, np.matrix([[1,0,0],[0,1,0],[0,0,det]])))
+                # print('ROTATION MATRIX')
                 # print(rotation_matrix)
 
-                # Translation
-                translation_vector_hand = np.dot(-rotation_matrix_hand, tgt_centroid.T) + ref_centroid.T
+                # Translation vector
+                translation_vector = np.dot(rotation_matrix, -(reference_centroid[np.newaxis].T)) + target_centroid[np.newaxis].T
 
-                # print('HANDY TRANSLATION MATRIX')
-                # print(translation_vector_hand)
-                # print('PRODY TRANSLATION MATRIX')
-                # print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getTranslation())
+                # print('TRANSLATION VECTOR')
+                # print(translation_vector)
+                # print(np.ravel(translation_vector))
 
-                # if det < 0:
-                #     # print(np.asarray([[1,0,0],[0,1,0],[0,0,-1]]))
-                #     # print('Before:')
-                #     # print(rotation_matrix)
-                #     rotation_matrix = np.dot(rotation_matrix, np.asarray([[1,0,0],[0,1,0],[0,0,-1]]))
-                #     # print('After:')
-                #     # print(rotation_matrix)
-                #     transformation.setRotation(rotation_matrix)
+                # Prody results
+                print('PRODY RESULTS')
+                print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getRotation())
+                print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getTranslation())
 
-                transformation = prody.Transformation(rotation_matrix_hand, translation_vector_hand.T[0])
-                # print(transformation.getMatrix())
-                # print(transformation.getRotation())
-                # print(transformation.getTranslation())
+                # np.testing.assert_array_almost_equal(np.ravel(translation_vector), prody.calcTransformation(target_conformer_atoms, reference_conformer_atoms).getTranslation())
 
-                conformer_transformation_dict[conformer_name][key] = transformation
+                conformer_transformation_dict[conformer_name][key] = prody.Transformation(rotation_matrix, np.ravel(translation_vector))
 
         return conformer_transformation_dict
 
