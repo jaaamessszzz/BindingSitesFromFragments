@@ -639,13 +639,17 @@ class Generate_Motif_Residues(Generate_Constraints):
         # Generate poses for representative residues only
         self.generate_residue_residue_clash_matrix(actually_generate_matrix=False)
         self.import_res_idx_map()
-
-        # Generate poses for all cluster residues
-        # self.generate_single_pose_from_selected_clusters()
-
-        # self.generate_residue_ligand_clash_list()
-        # self.score_residue_ligand_interactions()
+        self.generate_residue_ligand_clash_list()
+        self.score_residue_ligand_interactions()
         self.generate_residue_ligand_constraints()
+
+    def single_pose_cluster_residue_dump(self):
+        """
+        Generate single pose containing all residues from selected clusters for each conformer
+        :return: 
+        """
+        self.conformer_transformation_dict = self.generate_motif_transformation_dict()
+        self.generate_single_pose_from_selected_clusters()
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
         """
@@ -761,8 +765,8 @@ class Generate_Motif_Residues(Generate_Constraints):
                 # covariance_matrix = np.dot(target_centered.T, reference_centered)
                 covariance_matrix = np.dot(reference_centered.T, target_centered)
 
-                print('COVARIANCE')
-                print(covariance_matrix)
+                # print('COVARIANCE')
+                # print(covariance_matrix)
 
                 # Singular Value Decomposition of covariance matrix
                 V, s, Ut = np.linalg.svd(covariance_matrix)
@@ -792,9 +796,9 @@ class Generate_Motif_Residues(Generate_Constraints):
                 # print(np.ravel(translation_vector))
 
                 # Prody results
-                print('PRODY RESULTS')
-                print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getRotation())
-                print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getTranslation())
+                # print('PRODY RESULTS')
+                # print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getRotation())
+                # print(prody.calcTransformation(reference_conformer_atoms, target_conformer_atoms).getTranslation())
 
                 # np.testing.assert_array_almost_equal(np.ravel(translation_vector), prody.calcTransformation(target_conformer_atoms, reference_conformer_atoms).getTranslation())
 
@@ -898,8 +902,11 @@ class Generate_Motif_Residues(Generate_Constraints):
                 motif_prody = prody.parsePDB(motif_residue)
 
                 # Get residue index from residue_index_mapping_df
-                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))]
+                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))
+                                                                 & residue_index_mapping_df['source_conformer'] == conformer_name]
                 residue_index = residue_index_row['residue_index'].values[0]
+
+                print(motif_prody, residue_index)
 
                 # Get translation and rotation for fragment onto conformer
                 transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
@@ -1447,7 +1454,6 @@ class Generate_Binding_Sites():
         :param motif_indicies: 
         :return: 
         """
-
         #todo: update so that conformers constraints are supported
         conformer_path = os.path.join(self.user_defined_dir, 'Motifs', 'Residue_Ligand_Interactions', conformer)
 
@@ -1519,6 +1525,7 @@ class Generate_Binding_Sites():
         # Output only necessary scores to a .csv
         score_df.to_csv(os.path.join(self.constraints_path, '{}_scores_df.csv'.format(current_ligand)))
 
+    # DEPRECIATED
     def generate_binding_sites_by_hand(self):
         """
         This method takes the user defined residue groups and combines them as specified in the hypothetical_binding_sites
