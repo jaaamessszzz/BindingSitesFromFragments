@@ -26,13 +26,14 @@ Usage:
     bsff cluster <user_defined_dir> [options]
     bsff generate_motifs <user_defined_dir> [options]
     bsff prepare_motifs <user_defined_dir> [options]
-    bsff bind_everything <user_defined_dir> [options]
+    bsff bind_everything <user_defined_dir> <motif_size> [-s <score_cutoff_option>]
     bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
     bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
     bsff generate_fragments <ligand> [options]
-    bsff bind_by_hand <user_defined_dir> [options]
     bsff derp <user_defined_dir>
     bsff gurobi <user_defined_dir>
+    bsff classic <user_defined_dir> <motif_size>
+    bsff magic <user_defined_dir>
 
 Arguments:
     new
@@ -55,26 +56,33 @@ Arguments:
     
     prepare_motifs
         Prepare motifs for conformer binding site generation
-    
-    bind_everything
-        EVERYTHING.
-    
+
     generate_constraints
         Generate constraint files for all binding site conformations under a given score cutoff
     
     pull_constraints
         Pull constraint files with scores above a defined cutoff into a new directory
-        
-    bind_by_hand
-        Generate hypothetical binding sites based on motif residues bins defined by the user
     
+    gurobi
+        Use Gurobi to solve for best binding motifs given a feature reporter SQLITE3 DB generated with Rosetta
+        
+    classic
+        Do everything from search through prepare_motifs using default parameters. Follow with generate_constraints and
+        pull_constraints.
+    
+    magic
+        Literally do everything. Will eventually poop complete constraint files for best binding motifs. 
+        
     <ligand>
         By default, this is the name of the target ligand. This can be changed
         using the [ligand_input_format] option
         
     <user_defined_dir>
         Directory defined by user containing PubChem search results
-
+    
+    <motif_size>
+        Number of motif residues to use in a binding motif
+        
     <score_cutoff>
         Absolute value of score cutoff to use to generate constraint files. WILL BE CONVERTED TO NEGATIVE NUMBER,
         it's a pain to enter negative numbers in the command line... :(
@@ -193,116 +201,10 @@ def main():
         frag.search_for_fragment_containing_ligands()
 
     if args['align']:
-        # For each fragment, align all fragment-containing ligands to fragment
-        # Generate PDBs with aligned coordinate systems
-
-        # Import list of ligands to exclude from processing
-        # Three-letter ligand codes (UPPER CASE)
-        # e.g. IMD, so much randomly bound IMD everywhere
-        exclude_ligand_list = []
-        exclude_txt = os.path.join(working_directory, 'Inputs', 'User_Inputs', 'Exclude_Ligands.txt')
-        if os.path.exists(exclude_txt):
-            with open(exclude_txt, 'r') as exlude_ligands:
-                exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
-
-        # Fragment_1, Fragment_2, ...
-        for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
-            fragment_pdb = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
-            current_fragment = os.path.basename(fragment)
-
-            # Create directory for processed PDBs
-            processed_PDBs_path = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
-            os.makedirs(processed_PDBs_path, exist_ok=True)
-
-            # Three-letter codes for fragment-containing compounds
-            for fcc in directory_check(fragment):
-                ligand = os.path.basename(os.path.normpath(fcc))
-
-                # Check if ligand is in exclusion list
-                if ligand not in exclude_ligand_list:
-
-                    # Each PDB containing a fragment-containing compound
-                    for pdb in pdb_check(fcc):
-                        pdbid = os.path.basename(os.path.normpath(pdb))
-
-                        # Check if PDB has already been processed
-                        rejected_list_path = os.path.join(processed_PDBs_path, 'Rejected_PDBs.txt')
-                        rejected_list = []
-                        if os.path.exists(rejected_list_path):
-                            with open(rejected_list_path, 'r') as rejected_PDBs:
-                                rejected_list = [pdb.strip() for pdb in rejected_PDBs]
-
-                        processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
-
-                        if not processed_check(processed_dir, pdbid, rejected_list):
-                            print("\n\nProcessing {}".format(pdbid))
-                            # Set things up! Get ligands from Ligand Expo
-                            # This is to avoid downloading ligands when all PDBs have already been processed
-
-                            align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
-
-                            # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
-                            # I can't believe how unorganized everything is, damn.
-
-                            # Fetches ideal pdbs and list of PDB records where ligand is bound (for now)
-                            try:
-                                align.fetch_records()
-
-                            except Exception as e:
-                                print('{}: {}'.format(pdbid,e))
-                                with open(rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
-                                continue
-
-                            # Extract HETATM and CONECT records for the target ligand
-                            # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-
-                            reject = align.extract_ligand_records(pdb)
-                            # reject = align.fetch_specific_ligand_record(pdb)
-
-                            # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
-                            if reject:
-                                with open(rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
-
-                            # Continue if PDB has not been processed, rejected, or excluded by the user
-                            else:
-                                # Mapping of fragment atoms to target ligand atoms
-                                align.fragment_string = open(os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))).read()
-                                mapping_successful = align.fragment_target_mapping()
-
-                                if not mapping_successful:
-                                    with open(rejected_list_path, 'a+') as reject_list:
-                                        reject_list.write('{}\n'.format(pdbid))
-                                    continue
-
-                                # Determine translation vector and rotation matrix
-                                transformation_matrix = align.determine_rotation_and_translation()
-                                # print(transformation_matrix.getMatrix())
-
-                                # Apply transformation to protein_ligand complex
-                                align.apply_transformation(transformation_matrix)
-
-                        else:
-                            print('{} has been processed!'.format(pdb))
+        alignment_monstrosity(working_directory, args)
 
     if args['cluster']:
-        for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-            # processed_PDBs_dir, distance_cutoff, weights
-
-            # Set weights
-            weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1,1,1,1]
-            # Set distance cutoff
-            distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 5
-
-            cluster = Cluster(fragment, distance_cutoff, weights)
-
-            if len(cluster.pdb_object_list) > 2:
-                cluster.cluster_scipy()
-
-            if cluster.clusters is not None:
-                cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
-                cluster.automated_cluster_selection()
+        cluster(working_directory, args)
 
     if args['generate_motifs']:
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
@@ -315,16 +217,20 @@ def main():
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
         motifs.prepare_motifs_for_conformers()
 
-    if args['bind_by_hand']:
-        motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'r'))
-        hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'r'))
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
-        bind.generate_binding_sites_by_hand()
+    # DEPRECIATED
+    # if args['bind_by_hand']:
+    #     motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'r'))
+    #     hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'r'))
+    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
+    #     bind.generate_binding_sites_by_hand()
 
     if args['bind_everything']:
+        print(args['<motif_size>'])
+        print(args['--score_cutoff_option'])
+
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
-        bind.calculate_energies_and_rank()
-        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -25)
+        bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
+        bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
     if args['generate_constraints']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
@@ -363,3 +269,173 @@ def main():
         gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
+
+    if args['classic']:
+        # Search
+        frag = Fragments(working_directory)
+        frag.search_for_fragment_containing_ligands()
+
+        # Align
+        alignment_monstrosity(working_directory, args)
+
+        # Cluster
+        cluster(working_directory, args)
+
+        # Generate motifs
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs.generate_motif_residues()
+
+        # Prepare motifs
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs.prepare_motifs_for_conformers()
+
+        # Bind everything
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind.calculate_energies_and_rank(int(args['<motif_size>']))
+        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
+
+    if args['magic']:
+        # Search
+        frag = Fragments(working_directory)
+        frag.search_for_fragment_containing_ligands()
+
+        # Align
+        alignment_monstrosity(working_directory, args)
+
+        # Cluster
+        cluster(working_directory, args)
+
+        # Generate single poses
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs.single_pose_cluster_residue_dump()
+
+        # Gurobi
+        gurobi = score_with_gurobi(args['<user_defined_dir>'])
+        gurobi.generate_feature_reporter_db()
+        gurobi.consolidate_scores_better()
+        gurobi.do_gurobi_things()
+
+def alignment_monstrosity(working_directory, args):
+    """
+    Consequences of not thinking ahead...
+    :param args: 
+    :return: 
+    """
+    # For each fragment, align all fragment-containing ligands to fragment
+    # Generate PDBs with aligned coordinate systems
+
+    # Import list of ligands to exclude from processing
+    # Three-letter ligand codes (UPPER CASE)
+    # e.g. IMD, so much randomly bound IMD everywhere
+    exclude_ligand_list = []
+    exclude_txt = os.path.join(working_directory, 'Inputs', 'User_Inputs', 'Exclude_Ligands.txt')
+    if os.path.exists(exclude_txt):
+        with open(exclude_txt, 'r') as exlude_ligands:
+            exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
+
+    # Fragment_1, Fragment_2, ...
+    for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
+        fragment_pdb = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
+        current_fragment = os.path.basename(fragment)
+
+        # Create directory for processed PDBs
+        processed_PDBs_path = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
+        os.makedirs(processed_PDBs_path, exist_ok=True)
+
+        # Three-letter codes for fragment-containing compounds
+        for fcc in directory_check(fragment):
+            ligand = os.path.basename(os.path.normpath(fcc))
+
+            # Check if ligand is in exclusion list
+            if ligand not in exclude_ligand_list:
+
+                # Each PDB containing a fragment-containing compound
+                for pdb in pdb_check(fcc):
+                    pdbid = os.path.basename(os.path.normpath(pdb))
+
+                    # Check if PDB has already been processed
+                    rejected_list_path = os.path.join(processed_PDBs_path, 'Rejected_PDBs.txt')
+                    rejected_list = []
+                    if os.path.exists(rejected_list_path):
+                        with open(rejected_list_path, 'r') as rejected_PDBs:
+                            rejected_list = [pdb.strip() for pdb in rejected_PDBs]
+
+                    processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
+
+                    if not processed_check(processed_dir, pdbid, rejected_list):
+                        print("\n\nProcessing {}".format(pdbid))
+                        # Set things up! Get ligands from Ligand Expo
+                        # This is to avoid downloading ligands when all PDBs have already been processed
+
+                        align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
+
+                        # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
+                        # I can't believe how unorganized everything is, damn.
+
+                        # Fetches ideal pdbs and list of PDB records where ligand is bound (for now)
+                        try:
+                            align.fetch_records()
+
+                        except Exception as e:
+                            print('{}: {}'.format(pdbid, e))
+                            with open(rejected_list_path, 'a+') as reject_list:
+                                reject_list.write('{}\n'.format(pdbid))
+                            continue
+
+                        # Extract HETATM and CONECT records for the target ligand
+                        # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
+
+                        reject = align.extract_ligand_records(pdb)
+                        # reject = align.fetch_specific_ligand_record(pdb)
+
+                        # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
+                        if reject:
+                            with open(rejected_list_path, 'a+') as reject_list:
+                                reject_list.write('{}\n'.format(pdbid))
+
+                        # Continue if PDB has not been processed, rejected, or excluded by the user
+                        else:
+                            # Mapping of fragment atoms to target ligand atoms
+                            align.fragment_string = open(
+                                os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))).read()
+                            mapping_successful = align.fragment_target_mapping()
+
+                            if not mapping_successful:
+                                with open(rejected_list_path, 'a+') as reject_list:
+                                    reject_list.write('{}\n'.format(pdbid))
+                                continue
+
+                            # Determine translation vector and rotation matrix
+                            transformation_matrix = align.determine_rotation_and_translation()
+                            # print(transformation_matrix.getMatrix())
+
+                            # Apply transformation to protein_ligand complex
+                            align.apply_transformation(transformation_matrix)
+
+                    else:
+                        print('{} has been processed!'.format(pdb))
+
+def cluster(working_directory, args):
+    """
+    Consequences of not thinking ahead...
+    :return: 
+    """
+    for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
+        # processed_PDBs_dir, distance_cutoff, weights
+
+        # Set weights
+        weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
+        # Set distance cutoff
+        distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 5
+
+        cluster = Cluster(fragment, distance_cutoff, weights)
+
+        if len(cluster.pdb_object_list) > 2:
+            cluster.cluster_scipy()
+
+        if cluster.clusters is not None:
+            cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
+            cluster.automated_cluster_selection()

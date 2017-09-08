@@ -637,7 +637,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         self.conformer_transformation_dict = self.generate_motif_transformation_dict()
 
         # Generate poses for representative residues only
-        self.generate_residue_residue_clash_matrix(actually_generate_matrix=False)
+        self.generate_residue_residue_clash_matrix(actually_generate_matrix=True)
         self.import_res_idx_map()
         self.generate_residue_ligand_clash_list()
         self.score_residue_ligand_interactions()
@@ -902,8 +902,7 @@ class Generate_Motif_Residues(Generate_Constraints):
                 motif_prody = prody.parsePDB(motif_residue)
 
                 # Get residue index from residue_index_mapping_df
-                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))
-                                                                 & residue_index_mapping_df['source_conformer'] == conformer_name]
+                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))] # & residue_index_mapping_df['source_conformer'] == conformer_name
                 residue_index = residue_index_row['residue_index'].values[0]
 
                 print(motif_prody, residue_index)
@@ -921,8 +920,8 @@ class Generate_Motif_Residues(Generate_Constraints):
                 residue_residue_clash_set = set()
                 for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
                     for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
-                        outer_motif_index = outer_motif_tuple[0].split('-')[0]
-                        inner_motif_index = inner_motif_tuple[0].split('-')[0]
+                        outer_motif_index = int(outer_motif_tuple[0].split('-')[0])
+                        inner_motif_index = int(inner_motif_tuple[0].split('-')[0])
                         if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
 
                             # If clashing, append tuples in both orders... look up times? Whatever!
@@ -1149,7 +1148,6 @@ class Generate_Motif_Residues(Generate_Constraints):
             else:
                 self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True)
 
-
 class Generate_Binding_Sites():
     """
     This is a class for combining specified groups of binding motifs into hypothetical binding sites
@@ -1173,12 +1171,14 @@ class Generate_Binding_Sites():
         self.binding_site_pdbs = os.path.join(self.constraints_path, 'Binding_Site_PDBs')
         self.complete_constraint_files = os.path.join(self.constraints_path, 'Constraint_Files')
 
-    def calculate_energies_and_rank(self, use_mysql=True):
+    def calculate_energies_and_rank(self, use_mysql=True, motif_size=4):
         """
         Calculate total binding site interaction energies for all possible conformations of representative binding 
         motifs and rank.
         :return: 
         """
+        print('\nGenerating binding motifs of size {}...\n'.format(motif_size))
+
         # Retrieve list of Residue-Residue and Residue-Ligand Clashes
         residue_ligand_clash_dict = yaml.load(open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'r'))
         residue_residue_clash_dict = yaml.load(open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'r'))
@@ -1204,7 +1204,7 @@ class Generate_Binding_Sites():
                                                                       ])
 
         if use_mysql:
-              self._use_mysql(residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict)
+              self._use_mysql(residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict, motif_size)
         else:
               self._use_sqlite(residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict)
 
@@ -1280,11 +1280,31 @@ class Generate_Binding_Sites():
         connection = MySQLdb.connect(host='localhost', read_default_file="~/.my.cnf")
         connection.query('CREATE DATABASE IF NOT EXISTS scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
         connection.query('USE scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))))
-        connection.query('CREATE TABLE IF NOT EXISTS binding_motif_scores (conformer VARCHAR(10) NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))')
+        # connection.query('CREATE TABLE IF NOT EXISTS binding_motif_scores (conformer VARCHAR(10) NOT NULL, first INTEGER NOT NULL, second INTEGER NOT NULL, third INTEGER NOT NULL, fourth INTEGER NOT NULL, score REAL NOT NULL, PRIMARY KEY (conformer, first, second, third, fourth))')
+        connection.query(
+            '''
+            CREATE TABLE IF NOT EXISTS binding_motif_score(
+            ID int NOT NULL AUTO_INCREMENT,
+            conformer VARCHAR(10) NOT NULL,
+            score REAL NOT NULL,
+            PRIMARY KEY(ID, conformer, score)
+            )
+            '''
+        )
+        connection.query(
+            '''
+            CREATE TABLE IF NOT EXISTS binding_motif_residue(
+            ID int NOT NULL,
+            residue_id int NOT NULL,
+            PRIMARY KEY(ID, residue_id),
+            CONSTRAINT FOREIGN KEY (ID) REFERENCES binding_motif_score (ID)
+            )
+            '''
+        )
         cursor = connection.cursor()
         return connection, cursor
 
-    def _use_mysql(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict):
+    def _use_mysql(self, residue_residue_clash_dict, residue_ligand_clash_dict, score_agg_dict, motif_size=4):
         """
         Evaluates viable binding sites for each conformer and pushes the binding motif + score to a database
         Multiprocessing supported for each unique conformer
@@ -1308,10 +1328,6 @@ class Generate_Binding_Sites():
                                                read_default_file="~/.my.cnf")
             cursor_embed = connection_embed.cursor()
 
-            # Initialize things
-            running_tally = 0
-            score_list = []
-
             # For every conformer I've generated...
             conformer = residue_residue_clash_dict_tuple[0]
             residue_list = residue_residue_clash_dict_tuple[1]
@@ -1320,7 +1336,7 @@ class Generate_Binding_Sites():
             useable_residues_distance = list(set(representative_motif_residue_indices) - set(residue_ligand_clash_dict[conformer]))
 
             if filter:
-                # todo: filter residues based on residue-ligand score, take only top ~40%
+                # todo: filter residues based on residue-ligand score, take only top ~30%
                 # we only really care about residues that make good interactions with the ligand
                 import operator
                 residues_sorted_by_score = sorted(score_agg_dict[conformer].items(), key=operator.itemgetter(1))
@@ -1328,56 +1344,54 @@ class Generate_Binding_Sites():
                 # Drop scores > 0
                 residues_filtered_zero = [residue for residue in residues_sorted_by_score if residue[1] < 0]
 
-                # Drop remaining residues based on top 40% cutoff
-                best_scoring_residues = int(len(residues_filtered_zero) * 0.4)
+                # Drop remaining residues based on top 30% cutoff
+                best_scoring_residues = int(len(residues_filtered_zero) * 0.25)
                 residues_filtered_top_scoring = residues_filtered_zero[:best_scoring_residues]
                 useable_residues = list(set(useable_residues_distance) & set([residue[0] for residue in residues_filtered_top_scoring]))
 
             else:
                 useable_residues = list(set(useable_residues_distance) - set([key for key, value in score_agg_dict[conformer].items() if value > 0]))
 
-            # Generate all XXX choose 4 binding site configurations
-            list_of_residue_combinations = itertools.combinations(useable_residues, 4)
+            # Generate all XXX choose X binding site configurations
+            # todo: add option for number of residues in binding motif
+            list_of_residue_combinations = itertools.combinations(useable_residues, motif_size)
 
             # Calculate number of rows to be calculated
-            number_of_jobs = comb(len(useable_residues), 4, exact=True)
+            number_of_jobs = comb(len(useable_residues), motif_size, exact=True)
             print('\nWorking on {}: {} unique hypothetical binding motifs to be evaluated'.format(residue_residue_clash_dict_tuple[0], number_of_jobs))
 
-            # For each combination of four residues...
+            # Count completed binding motif combinations
+            overall_count = 0
+            committed_count = 0
+
+            # Track top score and only keep scores within, say, 0.2 of the best. This should cut down on required
+            # commits and runtime by reducing the number of required commits to DB. Commits are the limiting factor
+            # since the DB is locked everytime I call LAST_INSERT_ID()
+            best_score = 0
+
             for combo in list_of_residue_combinations:
-                # For each pair or residues, check if tuple is in residue_residue_clash_dict
 
-                # TEMP: Commented out for now
-                # fail_residue_combo = any([(pair in residue_list) for pair in itertools.combinations(combo, 2)])
-
-                # If there are no clashes, calculate Rosetta score (sum(fa_atr, fa_elec, hbond_sc))
-                # if not fail_residue_combo:
                 total_score = sum([score_agg_dict[conformer][res] for res in combo])
 
-                    # Push to MySQL DB table if score is < 0
-                    # if total_score < 0:
-                sorted_combo = sorted(combo)
+                if total_score < best_score:
+                    best_score = total_score
 
-                        # Sanitary? No. Good enough for now? Yes.
-                        # mysql_connection.query("INSERT OR IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES ({},{},{},{},{},{})".format(str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
-                score_list.append((str(conformer), int(sorted_combo[0]), int(sorted_combo[1]), int(sorted_combo[2]), int(sorted_combo[3]), float(total_score)))
+                if total_score < best_score * 0.8:
+                    cursor_embed.execute("""INSERT IGNORE INTO binding_motif_score (conformer, score) VALUES (%s,%s)""", (conformer, total_score,))
+                    for residue_id in combo:
+                        cursor_embed.execute("""INSERT IGNORE INTO binding_motif_residue (ID, residue_id) VALUES (LAST_INSERT_ID(), %s)""", (residue_id,))
 
-                # Push and commit to DB every 10000 rows
-                if len(score_list) == 10000:
-                    insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
-                    cursor_embed.executemany(insert_query, score_list)
                     connection_embed.commit()
-                    running_tally += 10000
-                    print('{}\t of ~{} rows completed for {}'.format(running_tally, number_of_jobs, conformer))
+                    committed_count += 1
 
-                    # Reset score_list
-                    score_list = []
+                    # Trying small transactions to speed things up...
+                    if committed_count % 100 == 0:
+                        connection_embed.commit()
 
-            # Final commit
-            if len(score_list) > 0:
-                insert_query = """INSERT IGNORE INTO binding_motif_scores (conformer, first, second, third, fourth, score) VALUES (%s,%s,%s,%s,%s,%s)"""
-                cursor_embed.executemany(insert_query, score_list)
-                connection_embed.commit()
+                overall_count += 1
+
+                if overall_count % 10000 == 0:
+                    print('Evaluated {} of {} for {}!'.format(overall_count, number_of_jobs, conformer))
 
             print('{} completed!!!'.format(conformer))
 
@@ -1388,7 +1402,7 @@ class Generate_Binding_Sites():
 
         mysql_connection.close()
 
-    def generate_binding_site_constraints(self, score_cutoff=-15, secondary_matching=False, use_mysql=True):
+    def generate_binding_site_constraints(self, score_cutoff=-10, secondary_matching=False, use_mysql=True):
         """
         Generate constraint files (and optionally binding site PDBs) for binding sites that pass score filters
         :return: 
@@ -1398,11 +1412,26 @@ class Generate_Binding_Sites():
                                                db='scored_binding_motifs_{}'.format(os.path.basename(os.path.normpath(self.user_defined_dir))),
                                                read_default_file="~/.my.cnf")
             mysql_cursor = mysql_connection.cursor()
-            mysql_cursor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
-            score_table_rows = mysql_cursor.fetchall()
+            mysql_cursor.execute(
+                """
+                SELECT binding_motif_score.ID, binding_motif_score.conformer, binding_motif_residue.residue_id, 
+                binding_motif_score.score FROM binding_motif_score INNER JOIN binding_motif_residue on 
+                binding_motif_score.ID = binding_motif_residue.ID WHERE score < {}
+                """.format(score_cutoff)
+            )
+            score_table_rows = pd.DataFrame([{'ID': row[0],
+                                              'conformer': row[1],
+                                              'residue_id': row[2],
+                                              'score': row[3]
+                                              } for row in mysql_cursor.fetchall()])
+
+            motifs_to_consider = len(score_table_rows['ID'].unique())
+            print('\nConsidering {} binding motifs...\n'.format(motifs_to_consider))
+
+        # SQLITE3 is very out of date....
         else:
             sqlite_connection, sqlite_cusor = self._generate_sqlite_db()
-            sqlite_cusor.execute("SELECT * FROM binding_motif_scores WHERE score < {}".format(score_cutoff))
+            sqlite_cusor.execute("SELECT * FROM binding_motif_score WHERE score < {}".format(score_cutoff))
             score_table_rows = sqlite_cusor.fetchall()
 
         # Create directories and files
@@ -1414,31 +1443,52 @@ class Generate_Binding_Sites():
         open(os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt'), 'w').close()
 
         if len(score_table_rows) > 0:
-            for row in score_table_rows:
-                score_things = True
-                row_conformer = row[0]
-                row_motif_indicies = row[1:-1]
-                row_score = row[5]
 
-                # Generate binding site PDB
-                self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
+            # Import residue-residue clash dict
+            residue_residue_clash_dict = yaml.load(open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'),'r'))
 
-                # Get individual motif residue constraint blocks
-                motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}-{}.cst'.format(row_conformer, index))).read() for index in row_motif_indicies]
+            # Count number of viable binding motif combinations
+            motif_count = 0
+            motifs_considered = 0
 
-                # Write constraint blocks to file
-                with open(os.path.join(self.complete_constraint_files, '-'.join([str(a) for a in row[:-1]]) + '.cst'), 'w') as complete_constraint_file:
+            for index, motif in score_table_rows.groupby(['ID']):
+                row_conformer = motif['conformer'].values[0]
+                row_motif_indicies = motif['residue_id'].values
+                row_score = motif['score'].values[0]
 
-                    # Options for secondary matching
-                    for index, block in enumerate(motif_constraint_block_list):
-                        complete_constraint_file.write('CST::BEGIN\n')
-                        complete_constraint_file.write(motif_constraint_block_list[index])
-                        complete_constraint_file.write('\n')
-                        if secondary_matching and index != 0:
-                            complete_constraint_file.write('  ALGORITHM_INFO:: match\n')
-                            complete_constraint_file.write('    SECONDARY_MATCH: DOWNSTREAM\n')
-                            complete_constraint_file.write('  ALGORITHM_INFO::END\n')
-                        complete_constraint_file.write('CST::END\n')
+                # Check that none of the residues clash
+                residue_list = residue_residue_clash_dict[row_conformer]
+                if all([(pair not in residue_list) for pair in itertools.combinations(row_motif_indicies, 2)]):
+
+                    # Generate binding site PDB
+                    self._generate_constraint_file_binding_site(row_conformer, row_motif_indicies)
+
+                    # Get individual motif residue constraint blocks
+                    motif_constraint_block_list = [open(os.path.join(self.user_defined_dir, 'Motifs', 'Single_Constraints', '{}-{}.cst'.format(row_conformer, index))).read() for index in row_motif_indicies]
+
+                    # Write constraint blocks to file
+                    with open(os.path.join(self.complete_constraint_files, '{}_{}.cst'.format(row_conformer, '-'.join([str(a) for a in row_motif_indicies]))), 'w') as complete_constraint_file:
+
+                        # Options for secondary matching
+                        for index, block in enumerate(motif_constraint_block_list):
+                            complete_constraint_file.write('CST::BEGIN\n')
+                            complete_constraint_file.write(motif_constraint_block_list[index])
+                            complete_constraint_file.write('\n')
+                            if secondary_matching and index != 0:
+                                complete_constraint_file.write('  ALGORITHM_INFO:: match\n')
+                                complete_constraint_file.write('    SECONDARY_MATCH: DOWNSTREAM\n')
+                                complete_constraint_file.write('  ALGORITHM_INFO::END\n')
+                            complete_constraint_file.write('CST::END\n')
+
+                    motif_count += 1
+
+                motifs_considered += 1
+
+                if motifs_considered % 1000 == 0:
+                    print('{}/{} motifs considered...'.format(motifs_considered, motifs_to_consider))
+
+            # Report number of viable binding motifs
+            print('\nFound {} viable binding motifs, proceeding to scoring...\n'.format(motif_count))
 
             # Score complete binding sites
             self._score_constraint_file_binding_site()
