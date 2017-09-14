@@ -105,7 +105,7 @@ class Cluster():
                                                                  'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
                                                                  'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
                                                                  'THR', 'VAL', 'TRP', 'TYR']:
-                    prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}.pdb'.format(cluster, str(index), residue[1].pdb_info)), residue[1].prody_residue)
+                    prody.writePDB(os.path.join(fragment_cluster_path, 'Cluster_{0}-Residue_{1}-{2}'.format(cluster, str(index), residue[1].pdb_info)), residue[1].prody_residue)
 
         # Export .csv
         self.df = pd.DataFrame(dict_list)

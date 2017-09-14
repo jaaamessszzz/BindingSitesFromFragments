@@ -225,8 +225,6 @@ def main():
     #     bind.generate_binding_sites_by_hand()
 
     if args['bind_everything']:
-        print(args['<motif_size>'])
-        print(args['--score_cutoff_option'])
 
         bind = Generate_Binding_Sites(args['<user_defined_dir>'])
         bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
@@ -261,9 +259,11 @@ def main():
                 shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
 
     if args['derp']:
-        import prody
-        conformers = prody.parsePDB(os.path.join(os.getcwd(), 'ONPF/Inputs/Rosetta_Inputs/Omega_Conformers/ONP_conformers.pdb'), model=10)
-
+        # Generate single poses
+        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs.single_pose_cluster_residue_dump()
+        
     if args['gurobi']:
         gurobi = score_with_gurobi(args['<user_defined_dir>'])
         gurobi.generate_feature_reporter_db()
