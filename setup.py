@@ -13,7 +13,7 @@ setup(
     name='Binding_Sites_From_Fragments',
     version='0.1',
     author='James Lucas',
-    author_email='james.lucas@berkeley.edi',
+    author_email='james.lucas@berkeley.edu',
     description='',
     long_description=readme,
     url='https://github.com/jaaamessszzz/Binding-Sites-From-Fragments',
@@ -37,7 +37,14 @@ setup(
         'pubchempy',
         'pypdb',
         'pandas',
-        'biopython'
+        'biopython',
+        'multiprocess',
+        'mysqlclient',
+        'networkx',
+        'pathos',
+        'prody',
+        'scipy',
+        'xmltodict'
     ],
     entry_points={
         'console_scripts': [
