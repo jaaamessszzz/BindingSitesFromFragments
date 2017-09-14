@@ -9,6 +9,7 @@ except ImportError:
 with open('README.md') as file:
     readme = file.read()
 
+# Setup
 setup(
     name='Binding_Sites_From_Fragments',
     version='0.1',
@@ -44,7 +45,8 @@ setup(
         'pathos',
         'prody',
         'scipy',
-        'xmltodict'
+        'xmltodict',
+        'appdirs'
     ],
     entry_points={
         'console_scripts': [
