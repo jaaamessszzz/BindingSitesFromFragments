@@ -123,6 +123,8 @@ import pprint
 import yaml
 import shutil
 import pandas as pd
+import appdirs
+
 from .fragments import Fragments
 from .alignments import Fragment_Alignments
 from .clustering import Cluster
@@ -131,7 +133,12 @@ from .utils import *
 from .gurobi_scoring import *
 
 def main():
+    # Import config
+    bsff_config_path = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files', 'bsff_config.yml')
+    with open(bsff_config_path, 'r') as config_stream:
+        bsff_config_dict = yaml.load(config_stream, Loader=yaml.Loader)
 
+    # Interpret command line args
     args = docopt.docopt(__doc__)
 
     if args['<user_defined_dir>']:
@@ -209,12 +216,12 @@ def main():
     if args['generate_motifs']:
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
         # Generate motif residues for each ligand conformer
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.generate_motif_residues()
 
     if args['prepare_motifs']:
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.prepare_motifs_for_conformers()
 
     # DEPRECIATED
@@ -226,12 +233,12 @@ def main():
 
     if args['bind_everything']:
 
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
         bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
     if args['generate_constraints']:
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
 
     if args['pull_constraints']:
@@ -261,7 +268,7 @@ def main():
     if args['derp']:
         # Generate single poses
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.single_pose_cluster_residue_dump()
         
     if args['gurobi']:
@@ -283,16 +290,14 @@ def main():
 
         # Generate motifs
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.generate_motif_residues()
 
         # Prepare motifs
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
         motifs.prepare_motifs_for_conformers()
 
         # Bind everything
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'])
+        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         bind.calculate_energies_and_rank(int(args['<motif_size>']))
         bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
@@ -309,7 +314,7 @@ def main():
 
         # Generate single poses
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.single_pose_cluster_residue_dump()
 
         # Gurobi

@@ -495,7 +495,7 @@ class Generate_Motif_Residues(Generate_Constraints):
                       'LYS': 9, 'LEU': 8, 'MET': 8, 'ASN': 8, 'PRO': 7, 'GLN': 9, 'ARG': 11, 'SER': 6,
                       'THR': 7, 'VAL': 7, 'TRP': 14, 'TYR': 12, 'MSE': 8, 'SEC': 6}
 
-    def __init__(self, user_defined_dir, motif_cluster_yaml):
+    def __init__(self, user_defined_dir, motif_cluster_yaml, config_dict=None):
         """
         :param user_defined_dir: 
         :param motif_cluster_yaml: 
@@ -509,6 +509,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         self.score_interactions_list_path = os.path.join(self.residue_ligand_interactions_dir, 'PDBs_to_score.txt')
         self.rosetta_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs')
         self.conformer_transformation_dict = None
+        self.user_config = config_dict
 
     def generate_motif_residues(self):
         """
@@ -1046,7 +1047,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
 
         # todo: make a config file where users can specify Rosetta path and other things...
-        run_jd2_score = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/score_jd2.macosclangrelease',
+        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/score_jd2.macosclangrelease'),
                                           '-l',
                                           self.score_interactions_list_path,
                                           '-extra_res_fa',
@@ -1164,7 +1165,7 @@ class Generate_Binding_Sites():
                        'fa_rep': 0.55
                        }
 
-    def __init__(self, user_defined_dir, residue_groups=None, hypothetical_binding_sites=None):
+    def __init__(self, user_defined_dir, residue_groups=None, hypothetical_binding_sites=None, config_dict=None):
         self.user_defined_dir = user_defined_dir
         self.residue_groups = residue_groups
         self.hypothetical_binding_sites = hypothetical_binding_sites
@@ -1172,6 +1173,8 @@ class Generate_Binding_Sites():
         self.constraints_path = os.path.join(self.user_defined_dir, 'Complete_Matcher_Constraints')
         self.binding_site_pdbs = os.path.join(self.constraints_path, 'Binding_Site_PDBs')
         self.complete_constraint_files = os.path.join(self.constraints_path, 'Constraint_Files')
+
+        self.user_config = config_dict
 
     def calculate_energies_and_rank(self, use_mysql=True, motif_size=4):
         """
@@ -1545,7 +1548,8 @@ class Generate_Binding_Sites():
         scores_dir = os.path.join(self.constraints_path, '{}_scores_raw.txt'.format(current_ligand))
         score_sites_list_path = os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt')
 
-        run_jd2_score = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/score_jd2.macosclangrelease',
+        # todo: update paths with config inputs
+        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], '/main/source/bin/score_jd2.macosclangrelease'),
                                           '-l',
                                           score_sites_list_path,
                                           '-extra_res_fa',
