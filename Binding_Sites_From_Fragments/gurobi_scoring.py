@@ -26,8 +26,10 @@ class score_with_gurobi():
         Generates a SQLITE3 database with all necessary two-body residue scores
         :return: 
         """
-        # todo: update with config file paths and options...
-        run_feature_reporter = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], '/main/source/bin/rosetta_scripts.{}'.format(self.user_config['Rosetta_compiler'])), # UPDATE
+
+        rosettascripts_path = os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/rosetta_scripts.{}'.format(self.user_config['Rosetta_compiler']))
+
+        run_feature_reporter = subprocess.Popen([rosettascripts_path, # UPDATE
                                                  '-parser:protocol',
                                                  os.path.join(self.resources_dir, 'RosettaScripts', 'Two_body_residue_feature_reporter.xml'),
                                                  '-out:nooutput',
