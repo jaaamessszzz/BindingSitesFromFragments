@@ -88,7 +88,7 @@ class score_with_gurobi():
             SELECT struct_id, resNum1, resNum2, 
             CASE
             WHEN sum(score_value) > 0 THEN 1 
-            WHEN sum(score_value) > 0.25 THEN 0
+            WHEN sum(score_value) > -0.25 THEN 0
             ELSE sum(score_value)
             END 
             as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
