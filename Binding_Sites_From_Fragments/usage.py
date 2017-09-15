@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """
 Generate hypothetical ligand binding pockets for a given ligand based on
 experimentally observed protein-ligand interactions in the PDB.
@@ -272,7 +271,7 @@ def main():
         motifs.single_pose_cluster_residue_dump()
         
     if args['gurobi']:
-        gurobi = score_with_gurobi(args['<user_defined_dir>'])
+        gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
@@ -318,7 +317,7 @@ def main():
         motifs.single_pose_cluster_residue_dump()
 
         # Gurobi
-        gurobi = score_with_gurobi(args['<user_defined_dir>'])
+        gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()

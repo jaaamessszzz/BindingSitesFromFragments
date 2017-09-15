@@ -13,9 +13,10 @@ class score_with_gurobi():
     """
     Class for determining best combinations of motif residues using Rosetta's feature reporter system
     """
-    def __init__(self, user_defined_dir):
+    def __init__(self, user_defined_dir, config_dict=None):
         self.user_defined_dir = user_defined_dir
         self.resources_dir = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files')
+        self.user_config = config_dict
 
     def complete_everything(self):
         pass
@@ -26,7 +27,7 @@ class score_with_gurobi():
         :return: 
         """
         # todo: update with config file paths and options...
-        run_feature_reporter = subprocess.Popen(['/Users/jameslucas/Rosetta/main/source/bin/rosetta_scripts.macosclangrelease', # UPDATE
+        run_feature_reporter = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], '/main/source/bin/rosetta_scripts.{}'.format(self.user_config['Rosetta_compiler'])), # UPDATE
                                                  '-parser:protocol',
                                                  os.path.join(self.resources_dir, 'RosettaScripts', 'Two_body_residue_feature_reporter.xml'),
                                                  '-out:nooutput',
