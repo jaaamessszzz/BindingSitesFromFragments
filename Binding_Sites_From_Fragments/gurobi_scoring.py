@@ -83,7 +83,16 @@ class score_with_gurobi():
         cursor = connection.cursor()
 
         residue_table = pd.read_sql_query("SELECT * from residues", connection)
-        score_table = pd.read_sql_query("SELECT struct_id, resNum1, resNum2, sum(score_value) as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;", connection)
+        score_table = pd.read_sql_query(
+            """
+            SELECT struct_id, resNum1, resNum2, 
+            CASE
+            WHEN sum(score_value) > 0 THEN 1 
+            WHEN sum(score_value) > 0.25 THEN 0
+            ELSE sum(score_value)
+            END 
+            as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
+            """, connection)
 
         for struct_id, table in residue_table.groupby(['struct_id']):
 
@@ -134,6 +143,8 @@ class score_with_gurobi():
 
             # pprint.pprint(index_mapping)
 
+            results_list = []
+
             for i in range(residue_interactions.SolCount):
                 residue_interactions.setParam(GRB.Param.SolutionNumber, i)
 
@@ -142,7 +153,11 @@ class score_with_gurobi():
                 print('Residue Indicies: {}'.format(res_index_tuple))
                 print('Obj: {}'.format(residue_interactions.objVal))
                 print('Non-Ideal Obj: {}'.format(residue_interactions.PoolObjVal))
-                pprint.pprint(source_pdb_list)
 
+                results_list.append({'Residue_indicies': res_index_tuple,
+                                     'Obj_score': residue_interactions.PoolObjVal})
+
+            df = pd.DataFrame(results_list)
+            df.to_csv('Gurobi_results.csv')
             break
 
