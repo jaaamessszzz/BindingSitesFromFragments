@@ -1,0 +1,24 @@
+<ROSETTASCRIPTS>
+    <SCOREFXNS>
+        <ScoreFunction name="sfxn" weights="ref2015"/>
+    </SCOREFXNS>
+    <RESIDUE_SELECTORS>
+    </RESIDUE_SELECTORS>
+    <TASKOPERATIONS>
+    </TASKOPERATIONS>
+    <FILTERS>
+    </FILTERS>
+    <MOVERS>
+        <ReportToDB name="features" database_name="./%%target%%/two_body_terms.db">
+            <ScoreTypeFeatures/>
+            <ResidueFeatures/>
+            <ResidueScoresFeatures scorefxn="sfxn"/>
+        </ReportToDB>
+    </MOVERS>
+    <APPLY_TO_POSE>
+    </APPLY_TO_POSE>
+    <PROTOCOLS>
+        <Add mover_name="features"/>
+    </PROTOCOLS>
+    <OUTPUT />
+</ROSETTASCRIPTS>
