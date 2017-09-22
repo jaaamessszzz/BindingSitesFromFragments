@@ -78,7 +78,13 @@ class score_with_gurobi():
             """
         )
 
-    def do_gurobi_things(self):
+    def generate_conformer_csvs(self):
+        """
+        Outputs csvs required to assemble the Gurobi model on the cluster for each conformer and its associated motif
+        residues. 
+        :return: 
+        """
+        # Generate gurobi input table/csv
         connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
         cursor = connection.cursor()
 
@@ -87,8 +93,26 @@ class score_with_gurobi():
             """
             SELECT struct_id, resNum1, resNum2, 
             CASE
-            WHEN sum(score_value) > 0 THEN 1 
-            WHEN sum(score_value) > -0.25 THEN 0
+            WHEN sum(score_value) > 0 THEN 1
+            ELSE sum(score_value)
+            END 
+            as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
+            """, connection)
+
+        for struct_id, table in residue_table.groupby(['struct_id']):
+            table.to_csv('{}_pairwise_scores-{}.csv'.format(os.path.basename(os.path.normpath(self.user_defined_dir)), struct_id))
+
+    def do_gurobi_things(self):
+        # Generate gurobi input table/csv
+        connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
+        cursor = connection.cursor()
+
+        residue_table = pd.read_sql_query("SELECT * from residues", connection)
+        score_table = pd.read_sql_query(
+            """
+            SELECT struct_id, resNum1, resNum2, 
+            CASE
+            WHEN sum(score_value) > 0 THEN 1
             ELSE sum(score_value)
             END 
             as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;

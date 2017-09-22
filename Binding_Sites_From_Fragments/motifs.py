@@ -647,7 +647,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         Generate single pose containing all residues from selected clusters for each conformer
         :return: 
         """
-        self.conformer_transformation_dict = self.generate_motif_transformation_dict(pose_from_clusters=True)
+        self.conformer_transformation_dict = self.generate_motif_transformation_dict(pose_from_clusters=False)
         self.generate_single_pose_from_selected_clusters()
 
     def generate_residue_ligand_clash_list(self, cutoff_distance=2):
@@ -1047,7 +1047,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
 
         # todo: make a config file where users can specify Rosetta path and other things...
-        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/score_jd2.macosclangrelease'),
+        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/score_jd2.{}'.format(self.user_config['Rosetta_compiler'])),
                                           '-l',
                                           self.score_interactions_list_path,
                                           '-extra_res_fa',
@@ -1549,7 +1549,7 @@ class Generate_Binding_Sites():
         score_sites_list_path = os.path.join(self.binding_site_pdbs, 'Binding_sites_to_score.txt')
 
         # todo: update paths with config inputs
-        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], '/main/source/bin/score_jd2.macosclangrelease'),
+        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], '/main/source/bin/score_jd2.{}'.format(self.user_config['Rosetta_compiler'])),
                                           '-l',
                                           score_sites_list_path,
                                           '-extra_res_fa',

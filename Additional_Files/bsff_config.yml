@@ -1,1 +1,4 @@
-{Rosetta_path: '/Users/jameslucas/Rosetta'}
+{
+Rosetta_path: '/Users/jameslucas/Rosetta',
+Rosetta_compiler: 'macosclangrelease'
+}

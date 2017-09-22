@@ -129,7 +129,6 @@ from .alignments import Fragment_Alignments
 from .clustering import Cluster
 from .motifs import Generate_Motif_Residues, Generate_Binding_Sites
 from .utils import *
-from .gurobi_scoring import *
 
 def main():
     # Import config
@@ -156,48 +155,6 @@ def main():
         with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_Inputs.csv'), 'w') as fragment_inputs:
             fragment_inputs.write('Fragment, SMILES_fragment')
 
-        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'w') as Hypothetical_Binding_Sites:
-            Hypothetical_Binding_Sites.write('\n'.join([
-                '# Hypothetical binding sites for {}'.format(args['<compound_name>']),
-                '# Create dictionaries with lists of motif bins that will be combinatorially',
-                '# combined to generate unique binding sites.',
-                '# These motif cluster names should be defined in Motif_Residue_Bins.yml',
-                '# Example:',
-                '# Binding_Site_1:',
-                '#  - Ring_Sammich_Top',
-                '#  - Ring_Sammich_Bottom',
-                '#  - Carboxyl_Bidentate',
-                '#  - Phenol_H-Bond']
-            ))
-
-        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'w') as Motif_Clusters:
-            Motif_Clusters.write('\n'.join([
-                '# Clusters to use for generating motif residues',
-                '# Create dictionaries with lists of cluster indices for each fragment.',
-                '# Representative motif residues will be pulled from these clusters.',
-                '# {}'.format(args['<compound_name>']),
-                '# Example:',
-                '# Fragment_1:',
-                '#   - 42',
-                '#   - 24',
-                '#   - 40',
-                '#   - 41',]
-            ))
-
-        with open(os.path.join(project_root_dir, 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'w') as Motif_Residue_Bins:
-            Motif_Residue_Bins.write('\n'.join([
-                '# Residue bins for {}'.format(args['<compound_name>']),
-                '# Define groups of residues around the ligand that make a unique type of contact',
-                '# Create dictionaries with lists of motif residue indices for each bin',
-                '# Example:',
-                '# Phenol_H-Bond:',
-                '#   - 14',
-                '#   - 15',
-                '#   - 20',
-                '#   - 23',
-                '#   - 22']
-            ))
-
     if args['generate_fragments']:
         frag = Fragments(working_directory)
         frag.generate_fragements_from_ligand(args['<ligand>'])
@@ -222,13 +179,6 @@ def main():
         motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
         motifs.prepare_motifs_for_conformers()
-
-    # DEPRECIATED
-    # if args['bind_by_hand']:
-    #     motif_residue_bins = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Residue_Bins.yml'), 'r'))
-    #     hypothetical_binding_sites = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Hypothetical_Binding_Sites.yml'), 'r'))
-    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], motif_residue_bins, hypothetical_binding_sites)
-    #     bind.generate_binding_sites_by_hand()
 
     if args['bind_everything']:
 
@@ -271,6 +221,7 @@ def main():
         motifs.single_pose_cluster_residue_dump()
         
     if args['gurobi']:
+        from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
@@ -301,6 +252,8 @@ def main():
         bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
     if args['magic']:
+        from .gurobi_scoring import score_with_gurobi
+
         # Search
         frag = Fragments(working_directory)
         frag.search_for_fragment_containing_ligands()
