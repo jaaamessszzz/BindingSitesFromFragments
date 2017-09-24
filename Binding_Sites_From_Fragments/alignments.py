@@ -297,10 +297,10 @@ class Align_PDB():
 
         if os.path.exists(frag_inputs_dir) and frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
             frag_atom_rigid, trgt_atom_rigid = self.return_rigid_atoms(current_fragment, frag_atom_coords, trgt_atom_coords)
-            return prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
+            return trgt_atom_coords, frag_atom_coords, prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
 
         else:
-            return prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
+            return trgt_atom_coords, frag_atom_coords, prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
 
     def return_rigid_atoms(self, current_fragment, frag_atom_coords, trgt_atom_coords):
         """

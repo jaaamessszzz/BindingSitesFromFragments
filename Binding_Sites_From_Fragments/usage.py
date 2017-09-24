@@ -29,10 +29,11 @@ Usage:
     bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
     bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
     bsff generate_fragments <ligand> [options]
-    bsff derp <user_defined_dir>
+    bsff dump_single_poses <user_defined_dir>
     bsff gurobi <user_defined_dir>
     bsff classic <user_defined_dir> <motif_size>
     bsff magic <user_defined_dir>
+    bsff derp <user_defined_dir> <gurobi_solutions_csv>
 
 Arguments:
     new
@@ -62,6 +63,9 @@ Arguments:
     pull_constraints
         Pull constraint files with scores above a defined cutoff into a new directory
     
+    dump_single_poses
+        Dump single poses
+        
     gurobi
         Use Gurobi to solve for best binding motifs given a feature reporter SQLITE3 DB generated with Rosetta
         
@@ -127,7 +131,7 @@ import appdirs
 from .fragments import Fragments
 from .alignments import Fragment_Alignments
 from .clustering import Cluster
-from .motifs import Generate_Motif_Residues, Generate_Binding_Sites
+from .motifs import Generate_Motif_Residues, Generate_Binding_Sites, Generate_Constraints
 from .utils import *
 
 def main():
@@ -170,14 +174,12 @@ def main():
         cluster(working_directory, args)
 
     if args['generate_motifs']:
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
         # Generate motif residues for each ligand conformer
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.generate_motif_residues()
 
     if args['prepare_motifs']:
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.prepare_motifs_for_conformers()
 
     if args['bind_everything']:
@@ -214,10 +216,9 @@ def main():
                 cst_file_name = '{}.cst'.format(row['description'][:-5])
                 shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
 
-    if args['derp']:
+    if args['dump_single_poses']:
         # Generate single poses
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.single_pose_cluster_residue_dump()
         
     if args['gurobi']:
@@ -239,8 +240,7 @@ def main():
         cluster(working_directory, args)
 
         # Generate motifs
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.generate_motif_residues()
 
         # Prepare motifs
@@ -265,8 +265,7 @@ def main():
         cluster(working_directory, args)
 
         # Generate single poses
-        motif_cluster_yaml = yaml.load(open(os.path.join(args['<user_defined_dir>'], 'Inputs', 'User_Inputs', 'Motif_Clusters.yml'), 'r'))
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], motif_cluster_yaml, config_dict=bsff_config_dict)
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.single_pose_cluster_residue_dump()
 
         # Gurobi
@@ -275,10 +274,18 @@ def main():
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
 
-def alignment_monstrosity(working_directory, args):
+    if args['derp']:
+        generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
+        generate_constraints.import_res_idx_map()
+        generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'])
+
+# todo: all of this (poorly implemented) logic should be in the alignment class...
+# todo: write a small function for adding rejected pdbs to the text file...
+def alignment_monstrosity(working_directory, args, rmsd_cutoff=1):
     """
     Consequences of not thinking ahead...
     :param args: 
+    :param rmsd_cutoff: fragment alignment RMSD cutoff, anything higher gets rejected 
     :return: 
     """
     # For each fragment, align all fragment-containing ligands to fragment
@@ -340,6 +347,7 @@ def alignment_monstrosity(working_directory, args):
                             print('{}: {}'.format(pdbid, e))
                             with open(rejected_list_path, 'a+') as reject_list:
                                 reject_list.write('{}\n'.format(pdbid))
+                            print('REJECTED - something went wrong with fetching the idealized target from LigandExpo')
                             continue
 
                         # Extract HETATM and CONECT records for the target ligand
@@ -352,6 +360,8 @@ def alignment_monstrosity(working_directory, args):
                         if reject:
                             with open(rejected_list_path, 'a+') as reject_list:
                                 reject_list.write('{}\n'.format(pdbid))
+                            print('REJECTED - no target ligands were fully represented in the PDB')
+
 
                         # Continue if PDB has not been processed, rejected, or excluded by the user
                         else:
@@ -363,14 +373,21 @@ def alignment_monstrosity(working_directory, args):
                             if not mapping_successful:
                                 with open(rejected_list_path, 'a+') as reject_list:
                                     reject_list.write('{}\n'.format(pdbid))
+                                print('REJECTED - failed atom mapping between target and reference fragment')
                                 continue
 
                             # Determine translation vector and rotation matrix
-                            transformation_matrix = align.determine_rotation_and_translation()
-                            # print(transformation_matrix.getMatrix())
+                            trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation()
 
-                            # Apply transformation to protein_ligand complex
-                            align.apply_transformation(transformation_matrix)
+                            # Apply transformation to protein_ligand complex if rmsd if below cutoff
+                            rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
+                            print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
+                            if rmsd < rmsd_cutoff:
+                                align.apply_transformation(transformation_matrix)
+                            else:
+                                with open(rejected_list_path, 'a+') as reject_list:
+                                    reject_list.write('{}\n'.format(pdbid))
+                                print('REJECTED - high RMSD upon alignment to reference fragment')
 
                     else:
                         print('{} has been processed!'.format(pdb))
