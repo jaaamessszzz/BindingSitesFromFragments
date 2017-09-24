@@ -33,7 +33,7 @@ Usage:
     bsff gurobi <user_defined_dir>
     bsff classic <user_defined_dir> <motif_size>
     bsff magic <user_defined_dir>
-    bsff derp <user_defined_dir> <gurobi_solutions_csv>
+    bsff derp <user_defined_dir> <conformer> <gurobi_solutions_csv>
 
 Arguments:
     new
@@ -277,7 +277,7 @@ def main():
     if args['derp']:
         generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
         generate_constraints.import_res_idx_map()
-        generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'])
+        generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'], args['<conformer>'])
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
