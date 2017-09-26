@@ -56,6 +56,9 @@ class Generate_Constraints():
         # Get residue prody
         residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(current_residue_index)).copy()
 
+        # DEBUGGING
+        print(residue_prody)
+
         residue_index_row = self.res_idx_map_df.loc[(self.res_idx_map_df['residue_index'] == current_residue_index) &
                                                     (self.res_idx_map_df['source_conformer'] == current_conformer)]
         residue_split = re.split('-|\.', residue_index_row['source_pdb'].values[0])
@@ -120,6 +123,7 @@ class Generate_Constraints():
 
         # RESIDUE CONSTRAINT ATOM INDICES
         # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
+        # todo: build checks to ensure these atoms actually exist...
         if residue_contact_atom.getName() in ['C', 'CA', 'CB', 'N', 'O']:
             if residue_contact_atom.getName() == 'CB':
                 residue_second_atom = residue_atom_index_map['CA']
@@ -530,7 +534,7 @@ class Generate_Constraints():
                 for index, row in relevant_rows.iterrows():
                     cluster_residue_set.add(index)
 
-        print("Solutions contain {} unique cluster solutions from {} residue".format(len(cluster_list_set), len(cluster_residue_set)))
+        print("Solutions contain {} unique cluster solutions consisted of {} residues".format(len(cluster_list_set), len(cluster_residue_set)))
 
         ############################################################
         # Generate matcher xml for each unique cluster combination #
@@ -545,10 +549,10 @@ class Generate_Constraints():
         # For each unqiue combination of cluster solutions
         for solution_tuples in sorted(list(cluster_list_set)):
             # Create constraint file
-            print(solution_tuples)
             contraint_file_name = '-'.join(['_'.join([toop[0], toop[1], self.three_to_one[toop[2]]]) for toop in solution_tuples]) + '.xml'
-            print(contraint_file_name)
             bw_constraint_file = open(os.path.join(bw_gurobi_constraints_dirpath, contraint_file_name), 'w')
+
+            print(contraint_file_name)
 
             # For each cluster within a solution
             for solution_tuple in solution_tuples: # (fragment, cluster)
@@ -589,7 +593,6 @@ class Generate_Constraints():
                 # For each residue in the cluster...
                 for cluster_residue in residue_row_indices:
                     residue_index = fragment_cluster_groups.get_group(solution_tuple).loc[cluster_residue, 'residue_index']
-                    print(residue_index)
 
                     # ideal_distance = constraint_atoms_dict['contact_distance']
                     ideal_distance = prody.calcDistance(
@@ -631,8 +634,6 @@ class Generate_Constraints():
                         single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[2])), #constraint_atoms_dict['residue']['atom_indices'][2]))
                     )
 
-                    print(ideal_distance, ideal_angle_A, ideal_angle_B, ideal_torsion_A, ideal_torsion_AB, ideal_torsion_B)
-
                     # todo: add options for tolerances and other goodies
                     # Write to constraint file
                     bw_constraint_file.write('\t<Combination>\n')
@@ -649,10 +650,9 @@ class Generate_Constraints():
 
             bw_constraint_file.close()
 
-
-    def _generate_BW_matcher_block(self):
+    def conventional_constraints_from_gurobi_solutions(self):
         """
-        Generates a single BW-style xml matcher constraint block for a given cluster
+        Generates conventional matcher constraints for a given Gurobi solution
         :return: 
         """
         pass
