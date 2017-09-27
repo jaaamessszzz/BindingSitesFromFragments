@@ -105,7 +105,7 @@ class Generate_Constraints():
         fragment_atoms_prody = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(fragment)))
         fragment_atom_names = fragment_atoms_prody.select('not hydrogen').getNames()
 
-        conformer_fragment_atoms = single_pose_prody.select('resname {} and name {} and not hydrogen'.format(ligand_code, ' '.join(fragment_atom_names)))
+        conformer_fragment_atoms = single_pose_prody.select('resname {} and name {}'.format(ligand_code, ' '.join(fragment_atom_names)))
         contact_distance, residue_index_low, ligand_index_low = minimum_contact_distance(residue_prody, conformer_fragment_atoms, return_indices=True)
 
         # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
@@ -124,7 +124,8 @@ class Generate_Constraints():
         # RESIDUE CONSTRAINT ATOM INDICES
         # Special cases: O (O>C>CA), N (N>CA>C), C (C>CA>N), CA (CA>C>O)
         # todo: build checks to ensure these atoms actually exist...
-        if residue_contact_atom.getName() in ['C', 'CA', 'CB', 'N', 'O']:
+        # todo: get C-Term and N-term special atoms...
+        if residue_contact_atom.getName() in ['C', 'CA', 'CB', 'N', 'O', 'OXT']:
             if residue_contact_atom.getName() == 'CB':
                 residue_second_atom = residue_atom_index_map['CA']
                 residue_third_atom = residue_atom_index_map['C']
@@ -140,6 +141,10 @@ class Generate_Constraints():
             elif residue_contact_atom.getName() == 'CA':
                 residue_second_atom = residue_atom_index_map['C']
                 residue_third_atom = residue_atom_index_map['O']
+            elif residue_contact_atom.getName() == 'OXT':
+                residue_second_atom = residue_atom_index_map['C']
+                residue_third_atom = residue_atom_index_map['CA']
+
             else:
                 raise Exception('wut.')
 
@@ -147,7 +152,7 @@ class Generate_Constraints():
             residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
             residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
 
-        ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, fragment_source_conformer)
+        ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, conformer_fragment_atoms)
 
         if verbose:
             print(current_conformer)
@@ -235,38 +240,67 @@ class Generate_Constraints():
 
             raise Exception('Somehow you\'ve run out of neighbors for your contact atom...')
 
-    def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_prody):
+    def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_fragment_prody):
         """
         Grabs the next ligand atoms down the line for ligand constraint records
+        :param current_atom_index: index of ligand contact atom in RD_ligand
+        :param RD_ligand: RDKit molecule of FULL ligand
+        :param ligand_fragment_prody: prody of ligand FRAGMENT from current conformer
         :return: 
         """
-        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_prody.select('not hydrogen')}
-
+        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_fragment_prody.select('not hydrogen')}
+        print(list(ligand_fragment_prody.getIndices()))
         ligand_contact_atom_neighbors = [atom for atom in
-                                         RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors()]
+                                         RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors() if atom.GetIdx() in ligand_index_atom_map.keys()]
+
+        # DEBUGGING
+        print(ligand_index_atom_map)
+        print(ligand_index_atom_map[current_atom_index])
 
         # Check all atoms that are adjacent to ligand contact atom
         for second_atom in ligand_contact_atom_neighbors:
 
             # Only investigate potential second constraint atoms with more than one neighbor
             if len([atom.GetIdx() for atom in second_atom.GetNeighbors()]) > 1:
-                ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors() if atom.GetSymbol() != 'H']
+                ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors() if atom.GetSymbol() != 'H' and atom.GetIdx() in ligand_index_atom_map.keys()]
                 second_atom_neighbors_set = set(
-                    [ligand_index_atom_map[atom.GetIdx()] for atom in ligand_second_atom_neighbors])
+                    [ligand_index_atom_map[atom.GetIdx()] for atom in ligand_second_atom_neighbors if atom.GetIdx() in ligand_index_atom_map.keys()])
 
                 # Check all atoms that are adjacent to the potential second constraint atom
                 for third_atom in ligand_second_atom_neighbors:
                     third_atom_neighbors_set = set(
                         [ligand_index_atom_map[atom.GetIdx()] for atom in third_atom.GetNeighbors() if
-                         atom.GetSymbol() != 'H'])
+                         atom.GetSymbol() != 'H' and atom.GetIdx() in list(ligand_index_atom_map.keys())])
                     common_two_three = third_atom_neighbors_set & second_atom_neighbors_set
 
                     # Only investigate potential third constraint atoms with more than one neighbor, not including second atom
                     if len(third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
                         ligand_second_atom = second_atom.GetIdx()
                         ligand_third_atom = third_atom.GetIdx()
-
+                        print(current_atom_index, ligand_second_atom, ligand_third_atom)
                         return ligand_second_atom, ligand_third_atom
+
+        # If the code reaches this point, then all neighbors of the second fragment atom are dead-ends
+        # That, or the second fragment atom is a dead-end
+        for second_atom in ligand_contact_atom_neighbors:
+            # ligand_second_atom_neighbors = [atom for atom in second_atom.GetNeighbors() if atom.GetSymbol() != 'H' and atom.GetIdx() in ligand_index_atom_map.keys()]
+            ligand_second_atom = second_atom.GetIdx()
+
+            if len([atom.GetIdx() for atom in second_atom.GetNeighbors()]) > 1:
+                ligand_third_atom = list(set([q for q in ligand_index_atom_map.keys()]) - set([current_atom_index, ligand_second_atom]))[0]
+                # index_ligand_atom_map = {b:a for a, b in ligand_index_atom_map.items()}
+                # print(ligand_third_atom_ID)
+                # print(index_ligand_atom_map)
+                # ligand_third_atom = index_ligand_atom_map[ligand_third_atom_ID]
+                print(current_atom_index, ligand_second_atom, ligand_third_atom)
+                return ligand_second_atom, ligand_third_atom
+
+        # If the code reaches this point, then the second fragment atom is a dead end
+        # The fragment contains 3 atoms or is contacted at the center of a branched fragment
+        # Just make the constraints a triangle with some neighbors
+        ligand_third_atom = list(set([atom.GetIdx() for atom in ligand_contact_atom_neighbors]) - set([ligand_second_atom]))[0]
+        print(current_atom_index, ligand_second_atom, ligand_third_atom)
+        return ligand_second_atom, ligand_third_atom
 
     def generate_residue_ligand_constraints(self):
         """
@@ -882,7 +916,6 @@ class Generate_Motif_Residues(Generate_Constraints):
         :return: 
         """
         # Precalculate transformation matrices for each fragment for each conformer
-        conformer_transformation_dict = {}
         ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))
 
         # Generate single pose with either representative motif residues or cluster residues
@@ -906,6 +939,8 @@ class Generate_Motif_Residues(Generate_Constraints):
         self.res_idx_map_df = pd.read_csv(os.path.join(self.reference_pose_dir, 'residue_index_mapping.csv'))
 
         # Use single pose to determine constraint atoms for each motif residue, add to dict
+        # For each motif residue, the transformation required to align the ligand contact atoms in the reference ligand
+        # onto the current conformer is the same transformation required to maintain the motif residue contact
         ligand_constraint_atoms_dict = {}
         for single_pose_path in pdb_check(self.reference_pose_dir):
             single_pose_prody = prody.parsePDB(single_pose_path)
@@ -913,15 +948,21 @@ class Generate_Motif_Residues(Generate_Constraints):
             ligand_prody = single_pose_prody.select('resname {}'.format(ligand_code))
 
             current_conformer = os.path.basename(os.path.normpath(single_pose_path)).split('-')[0]
-            conformer_transformation_dict[current_conformer] = {}
 
             for motif_residue in single_pose_hv.iterResidues():
                 if motif_residue.getResname() != ligand_code:
                     constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, motif_residue.getResnum(), verbose=False)
                     ligand_constraint_atoms_dict[motif_residue.getResnum()] = constraint_atoms_dict['ligand']['atom_names']
+
+            # DEBUGGING
+            pprint.pprint(ligand_constraint_atoms_dict)
+            sys.exit()
             break # Redundant
 
+        # todo: convert all uses of this function into for loops so I can convert this into a generator to save on memory
         # Generate conformer_transformation_dict
+        conformer_transformation_dict = {}
+
         for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
             conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
             conformer_transformation_dict[conformer_name] = {}
@@ -1175,6 +1216,7 @@ class Generate_Motif_Residues(Generate_Constraints):
 
             # Make a residue explosion
             conformer_single_pose = prody.parsePDB(conformer)
+            conformer_single_pose_clash_reference = prody.parsePDB(conformer)
 
             # Generate/append dict mapping residue indicies to source (will be exported/appended to .csv)
             residue_list_of_dicts = []
@@ -1184,10 +1226,15 @@ class Generate_Motif_Residues(Generate_Constraints):
             residue_count = 2 # Ligand is 1
 
             for motif_residue_name, residue_prody in motif_residue_list:
+
+                # todo: add clash check when generate single poses for Gurobi
+                # If a residue is too clsoe to the ligand, continue
+                if not generate_reference_pose and (minimum_contact_distance(residue_prody, conformer_single_pose_clash_reference) <= 2):
+                    continue
+
                 # Renumber all residues and set all residues to the same chain
                 residue_prody.setResnums([residue_count] * len(residue_prody))
                 residue_prody.setChids(['X'] * len(residue_prody))
-
 
                 # Add info to list of dicts
                 residue_list_of_dicts.append({'struct_id': int(ligand_ID.split('_')[1]),
