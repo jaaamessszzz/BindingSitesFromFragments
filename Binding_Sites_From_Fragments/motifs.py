@@ -56,9 +56,6 @@ class Generate_Constraints():
         # Get residue prody
         residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(current_residue_index)).copy()
 
-        # DEBUGGING
-        print(residue_prody)
-
         residue_index_row = self.res_idx_map_df.loc[(self.res_idx_map_df['residue_index'] == current_residue_index) &
                                                     (self.res_idx_map_df['source_conformer'] == current_conformer)]
         residue_split = re.split('-|\.', residue_index_row['source_pdb'].values[0])
@@ -249,13 +246,8 @@ class Generate_Constraints():
         :return: 
         """
         ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_fragment_prody.select('not hydrogen')}
-        print(list(ligand_fragment_prody.getIndices()))
         ligand_contact_atom_neighbors = [atom for atom in
                                          RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors() if atom.GetIdx() in ligand_index_atom_map.keys()]
-
-        # DEBUGGING
-        print(ligand_index_atom_map)
-        print(ligand_index_atom_map[current_atom_index])
 
         # Check all atoms that are adjacent to ligand contact atom
         for second_atom in ligand_contact_atom_neighbors:
@@ -277,8 +269,11 @@ class Generate_Constraints():
                     if len(third_atom_neighbors_set - common_two_three) > 1 and third_atom.GetIdx() != current_atom_index:
                         ligand_second_atom = second_atom.GetIdx()
                         ligand_third_atom = third_atom.GetIdx()
-                        print(current_atom_index, ligand_second_atom, ligand_third_atom)
                         return ligand_second_atom, ligand_third_atom
+
+        # NOTE!
+        # The following code was added to only select ligand constraint atoms from source fragments!!!
+        # To revert back to the old (worse?) method, remove the following and switch ligand_fragment_prody to full ligand
 
         # If the code reaches this point, then all neighbors of the second fragment atom are dead-ends
         # That, or the second fragment atom is a dead-end
@@ -288,18 +283,12 @@ class Generate_Constraints():
 
             if len([atom.GetIdx() for atom in second_atom.GetNeighbors()]) > 1:
                 ligand_third_atom = list(set([q for q in ligand_index_atom_map.keys()]) - set([current_atom_index, ligand_second_atom]))[0]
-                # index_ligand_atom_map = {b:a for a, b in ligand_index_atom_map.items()}
-                # print(ligand_third_atom_ID)
-                # print(index_ligand_atom_map)
-                # ligand_third_atom = index_ligand_atom_map[ligand_third_atom_ID]
-                print(current_atom_index, ligand_second_atom, ligand_third_atom)
                 return ligand_second_atom, ligand_third_atom
 
         # If the code reaches this point, then the second fragment atom is a dead end
         # The fragment contains 3 atoms or is contacted at the center of a branched fragment
         # Just make the constraints a triangle with some neighbors
         ligand_third_atom = list(set([atom.GetIdx() for atom in ligand_contact_atom_neighbors]) - set([ligand_second_atom]))[0]
-        print(current_atom_index, ligand_second_atom, ligand_third_atom)
         return ligand_second_atom, ligand_third_atom
 
     def generate_residue_ligand_constraints(self):
@@ -953,10 +942,6 @@ class Generate_Motif_Residues(Generate_Constraints):
                 if motif_residue.getResname() != ligand_code:
                     constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, motif_residue.getResnum(), verbose=False)
                     ligand_constraint_atoms_dict[motif_residue.getResnum()] = constraint_atoms_dict['ligand']['atom_names']
-
-            # DEBUGGING
-            pprint.pprint(ligand_constraint_atoms_dict)
-            sys.exit()
             break # Redundant
 
         # todo: convert all uses of this function into for loops so I can convert this into a generator to save on memory
@@ -1362,10 +1347,13 @@ class Generate_Motif_Residues(Generate_Constraints):
             # Make a list of all transformed prody motif residues
             motif_residue_list = []
 
+            # For each user-defined fragment...
             for dict_fragment in fragment_prody_dict:
 
+                # For each "quality" cluster...
                 for cluster_index in fragment_prody_dict[dict_fragment]:
 
+                    # For each residue where (cluster_residue_name, cluster_residue_prody)...
                     for cluster_member_tuple in fragment_prody_dict[dict_fragment][cluster_index]:
 
                         # Deep copy required... applyTransformation uses pointers to residue location
