@@ -78,30 +78,6 @@ class score_with_gurobi():
             """
         )
 
-    def generate_conformer_csvs(self):
-        """
-        Outputs csvs required to assemble the Gurobi model on the cluster for each conformer and its associated motif
-        residues. 
-        :return: 
-        """
-        # Generate gurobi input table/csv
-        connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
-        cursor = connection.cursor()
-
-        residue_table = pd.read_sql_query("SELECT * from residues", connection)
-        score_table = pd.read_sql_query(
-            """
-            SELECT struct_id, resNum1, resNum2, 
-            CASE
-            WHEN sum(score_value) > 0 THEN 1
-            ELSE sum(score_value)
-            END 
-            as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
-            """, connection)
-
-        for struct_id, table in residue_table.groupby(['struct_id']):
-            table.to_csv('{}_pairwise_scores-{}.csv'.format(os.path.basename(os.path.normpath(self.user_defined_dir)), struct_id))
-
     def do_gurobi_things(self):
         # Generate gurobi input table/csv
         connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
@@ -112,8 +88,8 @@ class score_with_gurobi():
             """
             SELECT struct_id, resNum1, resNum2, 
             CASE
-            WHEN sum(score_value) > 0 THEN 1
-            ELSE sum(score_value)
+            WHEN round(sum(score_value), 3) >= 0 THEN 1
+            ELSE round(sum(score_value), 3)
             END 
             as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
             """, connection)
@@ -144,10 +120,10 @@ class score_with_gurobi():
             residue_interactions.setObjective(quicksum((MIP_var_list[int(key[0] - 1)] * MIP_var_list[int(key[1] - 1)] * value) for key, value in score_dict.items()), GRB.MINIMIZE)
 
             # Add constraints
-            residue_interactions.addConstr(quicksum(MIP_var_list) <= 10) # Number of residues in a binding motif (includes ligand)
+            residue_interactions.addConstr(quicksum(MIP_var_list) <= 5) # Number of residues in a binding motif (includes ligand)
             residue_interactions.addConstr(MIP_var_list[0] == 1)
             for index, row in relevant_scores.iterrows():
-                if row['score_total'] > 0:
+                if row['score_total'] >= 0:
                     residue_interactions.addConstr(MIP_var_list[int(row['resNum1'] - 1)] + MIP_var_list[int(row['resNum2'] - 1)] <= 1)
 
             # Set Parameters
@@ -175,13 +151,16 @@ class score_with_gurobi():
                 res_index_tuple = [index + 1 for index, value in enumerate(residue_interactions.getVars()) if int(value.Xn) == 1]
                 source_pdb_list = [index_mapping.loc[idx, 'source_pdb'] for idx in res_index_tuple if idx != 1]
                 print('Residue Indicies: {}'.format(res_index_tuple))
-                print('Obj: {}'.format(residue_interactions.objVal))
-                print('Non-Ideal Obj: {}'.format(residue_interactions.PoolObjVal))
+                # print('Non-Ideal Obj: {}'.format(residue_interactions.PoolObjVal))
+
+                # Janky method to get values for non-ideal solutions since I can't get Model.PoolObjVal to work...
+                solution_residue_pairs = [a for a in itertools.combinations(res_index_tuple, 2)]
+                non_ideal_solution = quicksum(value for key, value in score_dict.items() if key in solution_residue_pairs)
+                print('Non-Ideal Obj: {}'.format(non_ideal_solution))
 
                 results_list.append({'Residue_indicies': res_index_tuple,
-                                     'Obj_score': residue_interactions.PoolObjVal})
+                                     'Obj_score': non_ideal_solution})
 
             df = pd.DataFrame(results_list)
             df.to_csv('Gurobi_results.csv')
             break
-
