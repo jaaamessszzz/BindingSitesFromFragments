@@ -42,6 +42,103 @@
             
   <div class="section" id="installation">
 <h1>Installation<a class="headerlink" href="#installation" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="dependencies">
+<h2>Dependencies<a class="headerlink" href="#dependencies" title="Permalink to this headline">¶</a></h2>
+<dl class="docutils">
+<dt>The following packages are required to use BindingSitesFromFragments:</dt>
+<dd><ul class="first last simple">
+<li>Rosetta</li>
+<li>RDKit</li>
+</ul>
+</dd>
+<dt>The following packages are highly recommended:</dt>
+<dd><ul class="first last simple">
+<li>Gurobi</li>
+<li>OpenEye Omega (or any other method to generate small molecule conformers)</li>
+</ul>
+</dd>
+<dt>Other Programs you may find useful:</dt>
+<dd><ul class="first last simple">
+<li>Avogadro</li>
+<li>Pymol</li>
+</ul>
+</dd>
+</dl>
+<div class="section" id="rosetta">
+<h3>Rosetta<a class="headerlink" href="#rosetta" title="Permalink to this headline">¶</a></h3>
+<p>Rosetta is a Macromolecular Design Suite that has ben used for all sorts of successful protein design applications.
+BindingSitesFromFragments uses Rosetta to:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li>Score pairwise interaction energies between sets of residues</li>
+<li>Match solved binding motifs into protein scaffolds</li>
+</ol>
+</div></blockquote>
+<p>You will need access to the RosettaCommons Github repository to clone and compile Rosetta.</p>
+</div>
+<div class="section" id="rdkit">
+<h3>RDKit<a class="headerlink" href="#rdkit" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="http://www.rdkit.org/docs/Overview.html">RDKit</a> is an open source chemoinformatics package that BindingSitesFromFragments
+relies on to perform substructure mapping. There are several ways to install RDKit with varying degrees of pain and
+suffering required. You may refer to the <a class="reference external" href="http://www.rdkit.org/docs/Install.html">installation documentaiton</a> provided
+by RDKit, but I’ve consolidated the instructions for my recommended methods here:</p>
+<blockquote>
+<div><ol class="arabic">
+<li><p class="first">If you are using a Macbook, install <a class="reference external" href="https://brew.sh/">homebrew</a> and <a class="reference external" href="https://github.com/rdkit/homebrew-rdkit">brew install RDKIT</a></p>
+</li>
+<li><p class="first">If you are using Ubuntu, you can <code class="docutils literal"><span class="pre">sudo</span> <span class="pre">apt-get</span> <span class="pre">install</span> <span class="pre">python-rdkit</span> <span class="pre">librdkit1</span> <span class="pre">rdkit-data</span></code></p>
+</li>
+<li><p class="first">Install <a class="reference external" href="http://docs.continuum.io/anaconda/install.html">Anaconda</a> and do the following:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>$ conda create -c rdkit -n my-rdkit-env rdkit
+$ source activate my-rdkit-env
+</pre></div>
+</div>
+</li>
+<li><p class="first">You can compile Boost and RDKit from source, but I’ve personally had a lot of trouble doing this using non-standard installations of Python/Boost.</p>
+</li>
+</ol>
+</div></blockquote>
+</div>
+<div class="section" id="gubobi">
+<h3>Gubobi<a class="headerlink" href="#gubobi" title="Permalink to this headline">¶</a></h3>
+<p><a class="reference external" href="https://www.gurobi.com/index">Gurobi</a> is an optimization package that BindingSitesFromFragments uses to solve for
+binding sites with minimized cumulative two-body interaction energies between all residue-residue and residue-ligand
+pairs. We have a UCSF license for using Gurobi on the QB3 cluster where everything is already set up, so you most likely
+will not have to worry about this.</p>
+</div>
+<div class="section" id="openeye-omega">
+<h3>OpenEye Omega<a class="headerlink" href="#openeye-omega" title="Permalink to this headline">¶</a></h3>
+<p>OpenEye Omega generates conformers for you target small molecule. You do not necessarily need to use OpenEye Omega, any
+method for generating small molecule conformers will do. However, we are using Omega as it comes highly recommended from
+other labs.</p>
+</div>
+<div class="section" id="avogadro">
+<h3>Avogadro<a class="headerlink" href="#avogadro" title="Permalink to this headline">¶</a></h3>
+<p>Avogadro is a molecular editor that makes it simple to generate and save both target molecules and fragments as Sybyl
+.mol2 or .pdb files.</p>
+</div>
+<div class="section" id="pymol">
+<h3>Pymol<a class="headerlink" href="#pymol" title="Permalink to this headline">¶</a></h3>
+<p>Pymol is a molecular viewer that is extremely handly for visualizing proteins, residue clusters, small molecule fragments,
+and basically anything that can be represented as a .pdb or sybyl .mol2 file.</p>
+</div>
+</div>
+<div class="section" id="id2">
+<h2>Installation<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h2>
+<p>Once all of the dependencies have been installed, clone the BindingSitesFromFragments repository somewhere convenient:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">mkdir</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">project</span><span class="o">/</span><span class="n">directory</span>
+<span class="n">cd</span> <span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">project</span><span class="o">/</span><span class="n">directory</span>
+<span class="n">git</span> <span class="n">clone</span> <span class="n">git</span><span class="nd">@github</span><span class="o">.</span><span class="n">com</span><span class="p">:</span><span class="n">jaaamessszzz</span><span class="o">/</span><span class="n">BindingSitesFromFragments</span><span class="o">.</span><span class="n">git</span>
+</pre></div>
+</div>
+<p>Installation should be as simple as:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">pip</span> <span class="n">install</span> <span class="o">--</span><span class="n">editable</span> <span class="o">./</span><span class="n">BindingSitesFromFragments</span>
+</pre></div>
+</div>
+<p>You should now be able to use BindingSitesFromFragments through the command line. Type <code class="docutils literal"><span class="pre">bsff</span> <span class="pre">--help</span></code> to see possible
+options. The accompanying repository <em>jaaamessszzz/BindingSiteFromFragments-Utilities</em> contains several scripts that you
+may find to be helpful for automating menial tasks during the design process.</p>
+</div>
 </div>
 
 
@@ -64,6 +161,7 @@
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="introduction.html">Introduction</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Usage/New.html">Start a New Project</a></li>
 <li class="toctree-l1"><a class="reference internal" href="Usage/Define_Fragments.html">Define Fragments</a></li>
 <li class="toctree-l1"><a class="reference internal" href="Usage/Search.html">Search for Ligand-Protein Complexes</a></li>
 <li class="toctree-l1"><a class="reference internal" href="Usage/Align.html">Align</a></li>
