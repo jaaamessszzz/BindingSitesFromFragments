@@ -224,7 +224,7 @@ def main():
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        gurobi.generate_feature_reporter_db()
+        # gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
 
@@ -281,7 +281,7 @@ def main():
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
-def alignment_monstrosity(working_directory, args, rmsd_cutoff=1):
+def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
     """
     Consequences of not thinking ahead...
     :param args: 
@@ -377,7 +377,7 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=1):
                                 continue
 
                             # Determine translation vector and rotation matrix
-                            trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation()
+                            trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(current_fragment=current_fragment)
 
                             # Apply transformation to protein_ligand complex if rmsd if below cutoff
                             rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
