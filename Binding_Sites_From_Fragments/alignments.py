@@ -296,6 +296,7 @@ class Align_PDB():
         frag_rigid_pdb_name = '{}-rigid.pdb'.format(current_fragment)
 
         if os.path.exists(frag_inputs_dir) and frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
+            print('* Using defined rigid atoms for alignment *')
             frag_atom_rigid, trgt_atom_rigid = self.return_rigid_atoms(current_fragment, frag_atom_coords, trgt_atom_coords)
             return trgt_atom_coords, frag_atom_coords, prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
 
@@ -356,7 +357,8 @@ class Align_PDB():
         """
         # Only work with residues within 12A of target ligand
         target_pdb = prody.parsePDB(self.pdb_file)
-        target_shell = target_pdb.select('protein and within 12 of (serial {0}) or (serial {0})'.format(self.target_fragment_atom_serials))
+        ligand_resnum = target_pdb.select('serial {0}'.format(self.target_fragment_atom_serials)).getResnums()[0]
+        target_shell = target_pdb.select('(protein and within 12 of (serial {0}) and not resnum {1}) or (serial {0})'.format(self.target_fragment_atom_serials, ligand_resnum))
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
         prody.writePDB(os.path.join(self.processed_PDBs_path, '{}-processed.pdb'.format(self.lig_request_suffix)), transformed_pdb)
