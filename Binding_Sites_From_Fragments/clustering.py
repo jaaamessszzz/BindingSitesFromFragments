@@ -31,7 +31,7 @@ class Cluster():
         processsed_residue_list = []
         for pdb in pdb_check(self.processed_PDBs_dir):
             pdb_info = os.path.basename(os.path.normpath(pdb))
-            prody_protein = prody.parsePDB(pdb).select('protein')
+            prody_protein = prody.parsePDB(pdb).select('protein and not hetatm')
             # Check that residues exist within cutoff distance provided in alignments, otherwise pass
             if prody_protein == None:
                 continue
