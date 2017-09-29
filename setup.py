@@ -11,13 +11,13 @@ with open('README.md') as file:
 
 # Setup
 setup(
-    name='Binding_Sites_From_Fragments',
+    name='BindingSitesFromFragments',
     version='0.1',
     author='James Lucas',
     author_email='james.lucas@berkeley.edu',
     description='',
     long_description=readme,
-    url='https://github.com/jaaamessszzz/Binding-Sites-From-Fragments',
+    url='https://github.com/jaaamessszzz/BindingSitesFromFragments',
     keywords=[
         'Binding Sites',
         'Fragments'
@@ -28,7 +28,7 @@ setup(
         'Programming Language :: Python :: 3',
     ],
     packages=[
-        'Binding_Sites_From_Fragments',
+        'BindingSitesFromFragments',
     ],
     install_requires=[
         'docopt',
@@ -50,7 +50,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'bsff = Binding_Sites_From_Fragments.usage:main',
+            'bsff = BindingSitesFromFragments.usage:main',
         ],
     },
     include_package_data=True,
