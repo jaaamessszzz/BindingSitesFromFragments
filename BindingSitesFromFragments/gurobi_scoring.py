@@ -131,7 +131,7 @@ class score_with_gurobi():
 
             # Exclude residues where residue-ligand interaction energy is above X
             ligand_residue_scores = score_table.groupby(['resNum1']).get_group(1)
-            for index, row in ligand_residue_scores:
+            for index, row in ligand_residue_scores.iterrows():
                 if row['score_total'] >= -0.5:
                     residue_interactions.addConstr(MIP_var_list[int(row['resNum2'] - 1)] == 0)
 
