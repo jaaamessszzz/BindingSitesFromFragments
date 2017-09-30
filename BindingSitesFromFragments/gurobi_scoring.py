@@ -88,8 +88,8 @@ class score_with_gurobi():
             """
             SELECT struct_id, resNum1, resNum2, 
             CASE
-            WHEN round(sum(score_value), 3) >= 0 THEN 1
-            ELSE round(sum(score_value), 3)
+            WHEN round(sum(score_value), 4) >= 0 THEN 1
+            ELSE round(sum(score_value), 4)
             END 
             as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
             """, connection)
@@ -102,47 +102,51 @@ class score_with_gurobi():
 
             # Set up model
             residue_interactions = Model("residue_interactions")
+            MIP_var_dict = {}
 
-            # Add MIP binary variables
-            MIP_var_list = []
-            for index, row in table.iterrows():
-                MIP_var_list.append(residue_interactions.addVar(vtype=GRB.BINARY, name=str(row['resNum'])))
+            # Add ligand
+            MIP_var_dict[float(1.0)] = residue_interactions.addVar(vtype=GRB.BINARY, name=str(1))
+
+            # Only add residues to Model if ligand-residue interaction energy is less than X
+            ligand_residue_scores = score_table.groupby(['struct_id', 'resNum1']).get_group((struct_id, 1))
+            for index, row in ligand_residue_scores.iterrows():
+                if row['score_total'] <= -0.5:
+                    MIP_var_dict[row['resNum2']] = residue_interactions.addVar(vtype=GRB.BINARY, name=str(row['resNum2']))
+
+            # List of residue indcies used in Model
+            MIP_residx_list = list(MIP_var_dict.keys())
 
             # Set up dict with pairwise scores
             score_dict = {}
             relevant_scores = score_table.groupby(['struct_id']).get_group(struct_id)
             for index, row in relevant_scores.iterrows():
-                score_dict[(row['resNum1'], row['resNum2'])] = row['score_total']
+                if all([row['resNum1'] in MIP_residx_list, row['resNum2'] in MIP_residx_list]):
+                    score_dict[(row['resNum1'], row['resNum2'])] = row['score_total']
 
             # Set objective function
-            # Get all possible reisude pairs
-            residue_pairs = itertools.combinations(MIP_var_list, 2)
-            residue_interactions.setObjective(quicksum((MIP_var_list[int(key[0] - 1)] * MIP_var_list[int(key[1] - 1)] * value) for key, value in score_dict.items()), GRB.MINIMIZE)
+            two_body_interactions = [MIP_var_dict[key[0]] * MIP_var_dict[key[1]] * value for key, value in score_dict.items()]
+
+            pprint.pprint([(key[0], key[1]) for key, value in score_dict.items()])
+            pprint.pprint(len(two_body_interactions))
+
+            residue_interactions.setObjective(quicksum(two_body_interactions), GRB.MINIMIZE)
 
             ###################
             # Add constraints #
             ###################
 
-            # Number of residues in a binding motif (includes ligand)
-            residue_interactions.addConstr(quicksum(MIP_var_list) == 7)
-
             # Always include ligand (residue 1)
-            residue_interactions.addConstr(MIP_var_list[0] == 1)
+            residue_interactions.addConstr(MIP_var_dict[float(1)] == 1)
 
-            # Exclude residues where residue-ligand interaction energy is above X
-            ligand_residue_scores = score_table.groupby(['struct_id', 'resNum1']).get_group((struct_id, 1))
-            pprint.pprint(ligand_residue_scores)
+            # Number of residues in a binding motif (includes ligand)
+            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == 3)
 
-            for index, row in ligand_residue_scores.iterrows():
-                if row['score_total'] >= 0:
-                    residue_interactions.addConstr(MIP_var_list[int(row['resNum2'] - 1)] == 0)
-
+            # todo: update this to use score_dict
             # Residues cannot be a solution if two-body interaction energy is above X
             current_struct_scores = score_table.groupby(['struct_id']).get_group(struct_id)
             for index, row in current_struct_scores.iterrows():
-                if row['score_total'] >= 0:
-                    residue_interactions.addConstr(
-                        MIP_var_list[int(row['resNum1'] - 1)] + MIP_var_list[int(row['resNum2'] - 1)] <= 1)
+                if row['score_total'] >= -0.1 and all([row['resNum1'] in MIP_residx_list, row['resNum2'] in MIP_residx_list]):
+                    residue_interactions.addConstr(MIP_var_dict[int(row['resNum1'])] + MIP_var_dict[int(row['resNum2'])] <= 1)
 
             # Set Parameters
             residue_interactions.Params.PoolSolutions = 10000
@@ -159,21 +163,20 @@ class score_with_gurobi():
             # Get residue-index mapping for current conformer
             index_mapping = pd.read_sql_query("SELECT * from residue_index_mapping WHERE struct_id = {}".format(struct_id), connection, index_col='residue_index')
 
-            # pprint.pprint(index_mapping)
-
             results_list = []
 
             for i in range(residue_interactions.SolCount):
                 residue_interactions.setParam(GRB.Param.SolutionNumber, i)
 
-                res_index_tuple = [index + 1 for index, value in enumerate(residue_interactions.getVars()) if int(value.Xn) == 1]
+                res_index_tuple = [int(float(value.VarName)) for index, value in enumerate(residue_interactions.getVars()) if int(value.Xn) == 1]
+
                 source_pdb_list = [index_mapping.loc[idx, 'source_pdb'] for idx in res_index_tuple if idx != 1]
                 print('Residue Indicies: {}'.format(res_index_tuple))
                 # print('Non-Ideal Obj: {}'.format(residue_interactions.PoolObjVal))
 
                 # Janky method to get values for non-ideal solutions since I can't get Model.PoolObjVal to work...
                 solution_residue_pairs = [a for a in itertools.combinations(res_index_tuple, 2)]
-                non_ideal_solution = sum([value for key, value in score_dict.items() if key in solution_residue_pairs])
+                non_ideal_solution = sum(value for key, value in score_dict.items() if key in solution_residue_pairs)
                 print('Non-Ideal Obj: {}'.format(non_ideal_solution))
 
                 results_list.append({'Residue_indicies': res_index_tuple,
