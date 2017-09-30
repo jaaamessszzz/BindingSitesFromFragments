@@ -130,22 +130,22 @@ class score_with_gurobi():
             residue_interactions.addConstr(MIP_var_list[0] == 1)
 
             # Exclude residues where residue-ligand interaction energy is above X
-            ligand_residue_scores = score_table.groupby(['resNum1']).get_group(1)
+            ligand_residue_scores = score_table.groupby(['struct_id', 'resNum1']).get_group((struct_id, 1))
+            pprint.pprint(ligand_residue_scores)
+
             for index, row in ligand_residue_scores.iterrows():
-                print(len(MIP_var_list))
-                print(row['resNum2'])
-                print(row['resNum2'] - 1)
-                if row['score_total'] >= -0.5:
+                if row['score_total'] >= 0:
                     residue_interactions.addConstr(MIP_var_list[int(row['resNum2'] - 1)] == 0)
 
             # Residues cannot be a solution if two-body interaction energy is above X
-            for index, row in score_table.iterrows():
+            current_struct_scores = score_table.groupby(['struct_id']).get_group(struct_id)
+            for index, row in current_struct_scores.iterrows():
                 if row['score_total'] >= 0:
                     residue_interactions.addConstr(
                         MIP_var_list[int(row['resNum1'] - 1)] + MIP_var_list[int(row['resNum2'] - 1)] <= 1)
 
             # Set Parameters
-            residue_interactions.Params.PoolSolutions = 1000
+            residue_interactions.Params.PoolSolutions = 10000
             residue_interactions.Params.PoolGap = 0.2
             residue_interactions.Params.PoolSearchMode = 2
 
@@ -173,7 +173,7 @@ class score_with_gurobi():
 
                 # Janky method to get values for non-ideal solutions since I can't get Model.PoolObjVal to work...
                 solution_residue_pairs = [a for a in itertools.combinations(res_index_tuple, 2)]
-                non_ideal_solution = quicksum(value for key, value in score_dict.items() if key in solution_residue_pairs)
+                non_ideal_solution = sum([value for key, value in score_dict.items() if key in solution_residue_pairs])
                 print('Non-Ideal Obj: {}'.format(non_ideal_solution))
 
                 results_list.append({'Residue_indicies': res_index_tuple,
