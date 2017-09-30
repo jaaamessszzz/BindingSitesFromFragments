@@ -119,15 +119,30 @@ class score_with_gurobi():
             residue_pairs = itertools.combinations(MIP_var_list, 2)
             residue_interactions.setObjective(quicksum((MIP_var_list[int(key[0] - 1)] * MIP_var_list[int(key[1] - 1)] * value) for key, value in score_dict.items()), GRB.MINIMIZE)
 
-            # Add constraints
-            residue_interactions.addConstr(quicksum(MIP_var_list) <= 5) # Number of residues in a binding motif (includes ligand)
+            ###################
+            # Add constraints #
+            ###################
+
+            # Number of residues in a binding motif (includes ligand)
+            residue_interactions.addConstr(quicksum(MIP_var_list) == 7)
+
+            # Always include ligand (residue 1)
             residue_interactions.addConstr(MIP_var_list[0] == 1)
-            for index, row in relevant_scores.iterrows():
+
+            # Exclude residues where residue-ligand interaction energy is above X
+            ligand_residue_scores = score_table.groupby(['resNum1']).get_group(1)
+            for index, row in ligand_residue_scores:
+                if row['score_total'] >= -0.5:
+                    residue_interactions.addConstr(MIP_var_list[int(row['resNum2'] - 1)] == 0)
+
+            # Residues cannot be a solution if two-body interaction energy is above X
+            for index, row in score_table.iterrows():
                 if row['score_total'] >= 0:
-                    residue_interactions.addConstr(MIP_var_list[int(row['resNum1'] - 1)] + MIP_var_list[int(row['resNum2'] - 1)] <= 1)
+                    residue_interactions.addConstr(
+                        MIP_var_list[int(row['resNum1'] - 1)] + MIP_var_list[int(row['resNum2'] - 1)] <= 1)
 
             # Set Parameters
-            residue_interactions.Params.PoolSolutions = 10000
+            residue_interactions.Params.PoolSolutions = 1000
             residue_interactions.Params.PoolGap = 0.2
             residue_interactions.Params.PoolSearchMode = 2
 
