@@ -110,7 +110,7 @@ class score_with_gurobi():
             # Only add residues to Model if ligand-residue interaction energy is less than X
             ligand_residue_scores = score_table.groupby(['struct_id', 'resNum1']).get_group((struct_id, 1))
             for index, row in ligand_residue_scores.iterrows():
-                if row['score_total'] <= -0.5:
+                if row['score_total'] <= -0.6:
                     MIP_var_dict[row['resNum2']] = residue_interactions.addVar(vtype=GRB.BINARY, name=str(row['resNum2']))
 
             # List of residue indcies used in Model
@@ -125,10 +125,6 @@ class score_with_gurobi():
 
             # Set objective function
             two_body_interactions = [MIP_var_dict[key[0]] * MIP_var_dict[key[1]] * value for key, value in score_dict.items()]
-
-            pprint.pprint([(key[0], key[1]) for key, value in score_dict.items()])
-            pprint.pprint(len(two_body_interactions))
-
             residue_interactions.setObjective(quicksum(two_body_interactions), GRB.MINIMIZE)
 
             ###################
@@ -139,7 +135,7 @@ class score_with_gurobi():
             residue_interactions.addConstr(MIP_var_dict[float(1)] == 1)
 
             # Number of residues in a binding motif (includes ligand)
-            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == 3)
+            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == 7)
 
             # todo: update this to use score_dict
             # Residues cannot be a solution if two-body interaction energy is above X
@@ -183,5 +179,4 @@ class score_with_gurobi():
                                      'Obj_score': non_ideal_solution})
 
             df = pd.DataFrame(results_list)
-            df.to_csv('Gurobi_results.csv')
-            break
+            df.to_csv('Gurobi_results-{0}-{1}.csv'.format(os.path.basename(os.path.normpath(self.user_defined_dir)), struct_id))
