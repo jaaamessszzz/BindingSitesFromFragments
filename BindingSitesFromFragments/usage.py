@@ -33,6 +33,8 @@ Usage:
     bsff gurobi <user_defined_dir>
     bsff classic <user_defined_dir> <motif_size>
     bsff magic <user_defined_dir>
+    bsff classic_gurobi_constraints <user_defined_dir> <gurobi_solutions_csv_dir> 
+    bsff BW_gurobi_constraints <user_defined_dir> <conformer> <gurobi_solutions_csv>
     bsff derp <user_defined_dir> <conformer> <gurobi_solutions_csv>
 
 Arguments:
@@ -225,7 +227,7 @@ def main():
         from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         # gurobi.generate_feature_reporter_db()
-        gurobi.consolidate_scores_better()
+        # gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
 
     if args['classic']:
@@ -274,10 +276,17 @@ def main():
         gurobi.consolidate_scores_better()
         gurobi.do_gurobi_things()
 
-    if args['derp']:
+    if args['BW_gurobi_constraints']:
         generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
         generate_constraints.import_res_idx_map()
         generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'], args['<conformer>'])
+
+    if args['classic_gurobi_constraints']:
+        # todo: add option for number of constraints to generate
+        # todo: add option for iterations
+        generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
+        generate_constraints.import_res_idx_map()
+        generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'], iteration=True)
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
