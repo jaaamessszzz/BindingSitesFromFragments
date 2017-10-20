@@ -751,7 +751,6 @@ class Generate_Constraints():
                 current_constraint_file.close()
 
                 # Write motif to PDB
-                #todo: order index list in same order as constraint file
                 # binding_motif = conformer_fuzzball.select('resnum {}'.format(' '.join([str(a) for a in index_list])))
                 binding_motif = conformer_fuzzball.select('resnum 1')
 
@@ -1293,10 +1292,27 @@ class Generate_Motif_Residues(Generate_Constraints):
 
             for motif_residue_name, residue_prody in motif_residue_list:
 
-                # todo: add clash check when generate single poses for Gurobi
-                # If a residue is too clsoe to the ligand, continue
-                if not generate_reference_pose and (minimum_contact_distance(residue_prody, conformer_single_pose_clash_reference) <= 1.5):
-                    continue
+                if not generate_reference_pose:
+                    # Don't add residues that Rosetta will throw out e.g. missing backbone atoms
+                    essential_bb_atoms = ['C', 'CA', 'N']
+
+                    # If a residue is too close to the ligand, continue
+                    contact_distance, row_index, column_index = minimum_contact_distance(residue_prody, conformer_single_pose_clash_reference, return_indices=True)
+
+                    if contact_distance <= 1.5 or not all([atom in residue_prody.getNames() for atom in essential_bb_atoms]):
+                        continue
+
+                # todo: if I end up ommitting bb/sc atoms for fuzzball, this would be the place to do it
+                # This is not possible in Rosetta, if mainchain is gone then the residue is skipped... bleh.
+
+                # Omit either sidechain or mainchain depending on contact atoms (ONLY FOR ACTUAL SINGLE POSES. NOT REFERENCE)
+                # if not generate_reference_pose:
+                #     residue_Hless_prody = residue_prody.select('not hydrogen').copy()
+                #     contact_atom_name = residue_Hless_prody.select('index {}'.format(row_index)).getNames()[0]
+                #     if contact_atom_name in ['O', 'CA', 'C', 'N', 'OXT']:
+                #         residue_prody = residue_prody.select('backbone').copy()
+                #     else:
+                #         residue_prody = residue_prody.select('not backbone').copy()
 
                 # Renumber all residues and set all residues to the same chain
                 residue_prody.setResnums([residue_count] * len(residue_prody))
@@ -1312,7 +1328,6 @@ class Generate_Motif_Residues(Generate_Constraints):
                 # Add to residue explosion
                 conformer_single_pose = conformer_single_pose + residue_prody
                 residue_count += 1
-
 
             # Output residue explosion to it's own happy directory under Inputs
             if generate_reference_pose == True:
@@ -1446,6 +1461,11 @@ class Generate_Motif_Residues(Generate_Constraints):
                         else:
                             # Get translation and rotation for fragment onto conformer
                             residue_index_row = self.res_idx_map_df.loc[self.res_idx_map_df['source_pdb'] == cluster_member_tuple[0]] # & self.res_idx_map_df['source_conformer'] == conformer_name]
+
+                            # Debugging
+                            print(cluster_member_tuple[0])
+                            print(residue_index_row)
+
                             residue_index = residue_index_row['residue_index'].iloc[0]
                             transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
 
