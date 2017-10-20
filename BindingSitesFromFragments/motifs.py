@@ -90,7 +90,7 @@ class Generate_Constraints():
         prody.writePDBStream(residue_io, residue_prody)
 
         RD_residue = Chem.MolFromPDBBlock(residue_io.getvalue(), removeHs=True)
-        RD_ligand = Chem.MolFromPDBBlock(open(fragment_source_conformer_path, 'r').read(), removeHs=True)  # Trouble?
+        RD_ligand = Chem.MolFromPDBBlock(open(fragment_source_conformer_path, 'r').read(), removeHs=False)  # Trouble? (if removeHs=True; EDIT: THIS NEEDS TO BE FALSE)
 
         # I need to determine the closest atom-atom contacts and two additional atoms for determining bond torsions and angles
         # NOTE: Contact distance and indicies are for residue and ligand with hydrogens stripped!
@@ -148,6 +148,11 @@ class Generate_Constraints():
         else:
             residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
             residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
+        
+        # debugging
+        # pprint.pprint(ligand_atom_list)
+        # pprint.pprint(ligand_contact_atom)
+        # pprint.pprint([atom.GetIdx() for atom in RD_ligand.GetAtoms()])
 
         ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, conformer_fragment_atoms)
 
@@ -710,13 +715,14 @@ class Generate_Constraints():
         if not iteration:
             gurobi_solutions = gurobi_solutions.sort_values(by=['Obj_score'], ascending=True).head(n=constraints_to_generate)
 
-        pprint.pprint(gurobi_solutions)
-
         # Group dataframe by conformer
         for current_conformer, conformer_df in gurobi_solutions.groupby(['Conformer']):
 
             # Open pdb only once!
             conformer_fuzzball = prody.parsePDB(os.path.join(self.single_pose_dir, '{}-single_pose.pdb'.format(current_conformer)))
+
+            # Keep track of previously calculated constraint blocks
+            previously_calculated_constraint_blocks = {}
 
             # For each unique solution for a given conformer
             for index, row in conformer_df.iterrows():
@@ -727,11 +733,15 @@ class Generate_Constraints():
                 current_constraint_file = open(os.path.join(gurobi_constraints_path, constraint_filename), 'w')
 
                 # Add constraint blocks to new constraint file for each residue in motif minus ligand
-                # todo: add option for starting constraint files with new constraints for iterative matching
-                # maybe generate sets to exclude previously solved residues first?
-                # this was resolved, gurobi iteration output are ordered as necessary
                 for residue_index in index_list[1:]:
-                    constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(conformer_fuzzball, current_conformer, residue_index)
+
+                    if residue_index in previously_calculated_constraint_blocks.keys():
+                        constraint_block = previously_calculated_constraint_blocks[residue_index]
+                    else:
+                        print('Calculating constraint block for {} - {}'.format(current_conformer, residue_index))
+                        constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(conformer_fuzzball, current_conformer, residue_index)
+                        previously_calculated_constraint_blocks[residue_index] = constraint_block
+
                     current_constraint_file.write('CST::BEGIN\n')
                     current_constraint_file.write('\n'.join(constraint_block))
                     current_constraint_file.write('\n')
@@ -742,7 +752,12 @@ class Generate_Constraints():
 
                 # Write motif to PDB
                 #todo: order index list in same order as constraint file
-                binding_motif = conformer_fuzzball.select('resnum {}'.format(' '.join([str(a) for a in index_list])))
+                # binding_motif = conformer_fuzzball.select('resnum {}'.format(' '.join([str(a) for a in index_list])))
+                binding_motif = conformer_fuzzball.select('resnum 1')
+
+                for resnum in index_list[1:]:
+                    binding_motif = binding_motif + conformer_fuzzball.select('resnum {}'.format(resnum))
+
                 motif_pdb_filename = '{}-{}.pdb'.format(current_conformer, '_'.join([str(a) for a in index_list]))
                 prody.writePDB(os.path.join(gurobi_motif_path, motif_pdb_filename), binding_motif)
 
