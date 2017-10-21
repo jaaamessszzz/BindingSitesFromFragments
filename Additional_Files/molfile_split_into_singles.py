@@ -18,6 +18,7 @@ import sys
 import os
 import docopt
 import subprocess
+import shutil
 import re
 from BindingSitesFromFragments.utils import pdb_check
 
@@ -101,5 +102,13 @@ def main():
                                          args['<compound_id>'],
                                          '--conformers-in-one-file'
                                          ])
+
+    # Move "standard" .param files and conformer library to its own directory
+    os.makedirs('Scoring_params', exist_ok=True)
+
+    shutil.copy2('{}.params'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.params'.format(args['<compound_id>'])))
+    shutil.copy2('{}.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.pdb'.format(args['<compound_id>'])))
+    shutil.copy2('{}_conformers.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}_conformers.pdb'.format(args['<compound_id>'])))
+
 if __name__ == '__main__':
     main()

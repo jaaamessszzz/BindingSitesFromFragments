@@ -1462,10 +1462,6 @@ class Generate_Motif_Residues(Generate_Constraints):
                             # Get translation and rotation for fragment onto conformer
                             residue_index_row = self.res_idx_map_df.loc[self.res_idx_map_df['source_pdb'] == cluster_member_tuple[0]] # & self.res_idx_map_df['source_conformer'] == conformer_name]
 
-                            # Debugging
-                            print(cluster_member_tuple[0])
-                            print(residue_index_row)
-
                             residue_index = residue_index_row['residue_index'].iloc[0]
                             transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
 
