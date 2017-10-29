@@ -51,7 +51,7 @@ class Generate_Constraints():
         :param current_residue_index: residue number for current residue in single pose
         :return: 
         """
-        ligand_code = os.path.normpath(os.path.basename(self.user_defined_dir))
+        ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
 
         # Get residue prody
         residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(current_residue_index)).copy()
@@ -709,6 +709,7 @@ class Generate_Constraints():
         gurobi_solutions = pd.DataFrame(columns=['Obj_score', 'Residue_indicies', 'Conformer'])
 
         for solution_set in os.listdir(gurobi_solutions_csv_dir):
+            # todo: only try to open csv files!!! Ran into issue with hidden files...
             temp_solution_df = pd.read_csv(os.path.join(gurobi_solutions_csv_dir, solution_set), usecols=['Obj_score', 'Residue_indicies', 'Conformer'])
             gurobi_solutions = gurobi_solutions.append(temp_solution_df, ignore_index=True)
 
@@ -752,13 +753,14 @@ class Generate_Constraints():
 
                 # Write motif to PDB
                 # binding_motif = conformer_fuzzball.select('resnum {}'.format(' '.join([str(a) for a in index_list])))
-                binding_motif = conformer_fuzzball.select('resnum 1')
+                if not iteration:
+                    binding_motif = conformer_fuzzball.select('resnum 1')
 
-                for resnum in index_list[1:]:
-                    binding_motif = binding_motif + conformer_fuzzball.select('resnum {}'.format(resnum))
+                    for resnum in index_list[1:]:
+                        binding_motif = binding_motif + conformer_fuzzball.select('resnum {}'.format(resnum))
 
-                motif_pdb_filename = '{}-{}.pdb'.format(current_conformer, '_'.join([str(a) for a in index_list]))
-                prody.writePDB(os.path.join(gurobi_motif_path, motif_pdb_filename), binding_motif)
+                    motif_pdb_filename = '{}-{}.pdb'.format(current_conformer, '_'.join([str(a) for a in index_list]))
+                    prody.writePDB(os.path.join(gurobi_motif_path, motif_pdb_filename), binding_motif)
 
     def assemble_cluster_dict(self, names_only=False):
         """
@@ -985,7 +987,7 @@ class Generate_Motif_Residues(Generate_Constraints):
         :return: 
         """
         # Precalculate transformation matrices for each fragment for each conformer
-        ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))
+        ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
 
         # Generate single pose with either representative motif residues or cluster residues
         motif_residue_list = []

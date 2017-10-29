@@ -242,6 +242,7 @@ class fragment_PDB():
             return None
 
         else:
+            # todo: use copies of prody selections so I don't do this base index BS
             residue_base_index = self.prody_residue.getIndices()[0]
             ligand_base_index = self.prody_ligand.getIndices()[0]
 

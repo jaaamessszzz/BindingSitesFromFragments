@@ -15,6 +15,7 @@ class score_with_gurobi():
     """
     def __init__(self, user_defined_dir, config_dict=None):
         self.user_defined_dir = user_defined_dir
+        self.ligand_code = user_defined_dir[:3]
         self.resources_dir = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files')
         self.user_config = config_dict
 
@@ -34,11 +35,11 @@ class score_with_gurobi():
                                                  os.path.join(self.resources_dir, 'RosettaScripts', 'Two_body_residue_feature_reporter.xml'),
                                                  '-out:nooutput',
                                                  '-parser:script_vars',
-                                                 'target={}'.format(self.user_defined_dir),
+                                                 'target={}'.format(self.ligand_code),
                                                  '-l',
-                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/single_pose_list.txt'.format(self.user_defined_dir),
+                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/single_pose_list.txt'.format(self.ligand_code),
                                                  '-extra_res_fa',
-                                                 './{}/Inputs/Rosetta_Inputs/{}.params'.format(self.user_defined_dir, self.user_defined_dir)
+                                                 './{}/Inputs/Rosetta_Inputs/Scoring_params/{}.params'.format(self.user_defined_dir, self.ligand_code)
                                                  ])
         run_feature_reporter.wait()
 
@@ -135,7 +136,8 @@ class score_with_gurobi():
             residue_interactions.addConstr(MIP_var_dict[float(1)] == 1)
 
             # Number of residues in a binding motif (includes ligand)
-            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == 7)
+            motif_count = 5
+            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == motif_count)
 
             # todo: update this to use score_dict
             # Residues cannot be a solution if two-body interaction energy is above X
@@ -149,8 +151,9 @@ class score_with_gurobi():
             residue_interactions.Params.PoolGap = 0.2
             residue_interactions.Params.PoolSearchMode = 2
 
-            residue_interactions.Params.MIPFocus = 3
-            residue_interactions.Params.Heuristics = 0.1
+            # residue_interactions.Params.MIPFocus = 3
+            # residue_interactions.Params.Presolve = 2
+            # residue_interactions.Params.Heuristics = 0.1
 
             # Optimize
             residue_interactions.optimize()
@@ -162,7 +165,10 @@ class score_with_gurobi():
             # Get residue-index mapping for current conformer
             index_mapping = pd.read_sql_query("SELECT * from residue_index_mapping WHERE struct_id = {}".format(struct_id), connection, index_col='residue_index')
 
+            # Set variables
             results_list = []
+            compound_id = residue_table.loc[residue_table["resNum"] == 1]['name3'][0]
+            residues_in_motif = motif_count - 1
 
             for i in range(residue_interactions.SolCount):
                 residue_interactions.setParam(GRB.Param.SolutionNumber, i)
@@ -179,7 +185,8 @@ class score_with_gurobi():
                 print('Non-Ideal Obj: {}'.format(non_ideal_solution))
 
                 results_list.append({'Residue_indicies': res_index_tuple,
-                                     'Obj_score': non_ideal_solution})
+                                     'Obj_score': non_ideal_solution,
+                                     'Conformer': '{}_{:0>4}'.format(compound_id, struct_id)})
 
             df = pd.DataFrame(results_list)
-            df.to_csv('Gurobi_results-{0}-{1}.csv'.format(os.path.basename(os.path.normpath(self.user_defined_dir)), struct_id))
+            df.to_csv('Gurobi_results-{0}-{1}_residue-conformer_{2}.csv'.format(compound_id, residues_in_motif, struct_id))
