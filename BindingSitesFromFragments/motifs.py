@@ -328,13 +328,13 @@ class Generate_Constraints():
                                          distance_tolerance_d=0.5, angle_A_tolerance_d=5, angle_B_tolerance_d=5,
                                          torsion_A_tolerance_d=5, torsion_AB_tolerance_d=5, torsion_B_tolerance_d=5,
                                          torsion_constraint_sample_number=1, angle_constraint_sample_number=1,
-                                         distance_constraint_sample_number=0, use_default_tolerances=True):
+                                         distance_constraint_sample_number=0, use_default_tolerances=True, greasy_sampling=False):
         """
         Generate a single constraint block for one residue-ligand interaction
         :return: 
         """
         constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, residue_index)
-        ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
+        ligand = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
         ligand_prody = single_pose_prody.select('resname {}'.format(ligand)).copy()
         residue_prody = single_pose_prody.select('resnum {}'.format(residue_index)).copy()
 
@@ -486,7 +486,7 @@ class Generate_Constraints():
             torsion_AB_tolerance = torsion_AB_tolerance_d
             torsion_B_tolerance = torsion_B_tolerance_d
 
-        # todo: update this for backbone contacts to allow for any residue identity
+        # Updated this for backbone contacts to allow for any residue identity
         if constraint_atoms_dict['residue']['atom_names'][0] in ['C', 'CA', 'N', 'O', 'OXT']:
             residue_resname = 'ACDEFHIKLMNQRSTVWY'
             residue_tag = 'residue1'
@@ -494,6 +494,16 @@ class Generate_Constraints():
             residue_resname = residue_prody.getResnames()[0]
             residue_tag = 'residue3'
         ligand_resname = ligand_prody.getResnames()[0]
+
+        # Increase tolerance/sampling by 5/1 for greasy residues (ACFILMVWY)
+        if greasy_sampling and residue_resname in ['ALA', 'CYS', 'PHE', 'ILE', 'LEU', 'MET', 'VAL', 'TRP', 'TYR']:
+            angle_A_tolerance += 5
+            angle_B_tolerance += 5
+            torsion_A_tolerance += 5
+            torsion_AB_tolerance += 5
+            torsion_B_tolerance += 5
+            torsion_constraint_sample_number += 1
+            angle_constraint_sample_number += 1
 
         constraint_block = [
             '  TEMPLATE::   ATOM_MAP: 1 atom_name: {}'.format(' '.join(constraint_atoms_dict['ligand']['atom_names'])),
@@ -597,7 +607,7 @@ class Generate_Constraints():
                 bw_constraint_file.write('<MatcherConstraint>\n')
 
                 # Get upstream and downstream three-letter IDs
-                downstream_residue = os.path.basename(os.path.normpath(self.user_defined_dir))
+                downstream_residue = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
                 upstream_residue = solution_tuple[2]
 
                 # Get residues that will constitute a constraint block
@@ -687,7 +697,7 @@ class Generate_Constraints():
 
             bw_constraint_file.close()
 
-    def conventional_constraints_from_gurobi_solutions(self, gurobi_solutions_csv_dir, constraints_to_generate=1000, iteration=False):
+    def conventional_constraints_from_gurobi_solutions(self, gurobi_solutions_csv_dir, constraints_to_generate=1000, offset=0, iteration=False, angle_dihedral_tolerance=5, angle_dihedral_sample_number=1, greasy_sampling=False):
         """
         Generates conventional matcher constraints for a given Gurobi solution
         
@@ -714,7 +724,7 @@ class Generate_Constraints():
             gurobi_solutions = gurobi_solutions.append(temp_solution_df, ignore_index=True)
 
         if not iteration:
-            gurobi_solutions = gurobi_solutions.sort_values(by=['Obj_score'], ascending=True).head(n=constraints_to_generate)
+            gurobi_solutions = gurobi_solutions.sort_values(by=['Obj_score'], ascending=True).head(n=constraints_to_generate).tail(constraints_to_generate - offset)
 
         # Group dataframe by conformer
         for current_conformer, conformer_df in gurobi_solutions.groupby(['Conformer']):
@@ -740,7 +750,11 @@ class Generate_Constraints():
                         constraint_block = previously_calculated_constraint_blocks[residue_index]
                     else:
                         print('Calculating constraint block for {} - {}'.format(current_conformer, residue_index))
-                        constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(conformer_fuzzball, current_conformer, residue_index)
+                        constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(conformer_fuzzball, current_conformer, residue_index,
+                                                                                                        angle_A_tolerance_d=angle_dihedral_tolerance, angle_B_tolerance_d=angle_dihedral_tolerance,
+                                                                                                        torsion_A_tolerance_d=angle_dihedral_tolerance, torsion_AB_tolerance_d=angle_dihedral_tolerance,
+                                                                                                        torsion_B_tolerance_d=angle_dihedral_tolerance, torsion_constraint_sample_number=angle_dihedral_sample_number,
+                                                                                                        angle_constraint_sample_number=angle_dihedral_sample_number, greasy_sampling=greasy_sampling)
                         previously_calculated_constraint_blocks[residue_index] = constraint_block
 
                     current_constraint_file.write('CST::BEGIN\n')

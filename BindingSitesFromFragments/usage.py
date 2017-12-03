@@ -25,7 +25,7 @@ Usage:
     bsff cluster <user_defined_dir> [options]
     bsff generate_motifs <user_defined_dir> [options]
     bsff prepare_motifs <user_defined_dir> [options]
-    bsff bind_everything <user_defined_dir> <motif_size> [-s <score_cutoff_option>]
+    bsff bind_everything <user_defined_dir> <motif_size> [-x <score_cutoff_option>]
     bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
     bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
     bsff generate_fragments <ligand> [options]
@@ -33,7 +33,7 @@ Usage:
     bsff gurobi <user_defined_dir>
     bsff classic <user_defined_dir> <motif_size>
     bsff magic <user_defined_dir>
-    bsff classic_gurobi_constraints <user_defined_dir> <gurobi_solutions_csv_dir> 
+    bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g]
     bsff BW_gurobi_constraints <user_defined_dir> <conformer> <gurobi_solutions_csv>
     bsff derp <user_defined_dir> <conformer> <gurobi_solutions_csv>
 
@@ -94,7 +94,7 @@ Arguments:
     
     <number_to_pull>
         Limit to number of constraint files to pull with --number_to_pull option
-        
+
 Options:
     -c --clusters <clusters>
         Set number of clusters
@@ -104,6 +104,9 @@ Options:
         
     -f --ligand_input_format <format>
         Use a different input format for the ligand. [CID|name|smiles]
+
+    -g --greasy_sampling
+        Increase the tolerance and sample number for greasy residues (ACFILMVWY)
         
     -m --secondary_matching
         Use secondary matching for constraint files
@@ -113,14 +116,21 @@ Options:
         
     -r --rosetta_scores
         Calculate Rosetta score terms for unique residue-ligand interactions during the motif residue generation step
-    
-    -s --score_cutoff_option <score_cutoff_option>
-        Score cutoff to use for generating constraint files
-        
+
+    -s --samples <samples>
+        Set sample number for matcher constraint files
+
+    -t --tolerances <tolerance> <samples>
+        Set tolerances for matcher constraint files
+
     -w --weights <weights>
         Comma separated values for representative vector weights
 
+    -x --score_cutoff_option <score_cutoff_option>
+        Score cutoff to use for generating constraint files
 """
+__author__ = 'James Lucas'
+
 import docopt
 import os
 import sys
@@ -144,6 +154,9 @@ def main():
 
     # Interpret command line args
     args = docopt.docopt(__doc__)
+
+    # Get ligand three-letter code
+    ligand_code = args['<user_defined_dir>'][:3]
 
     if args['<user_defined_dir>']:
         working_directory = os.path.join(os.path.curdir, args['<user_defined_dir>'])
@@ -226,9 +239,9 @@ def main():
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        # gurobi.generate_feature_reporter_db()
-        # gurobi.consolidate_scores_better()
-        gurobi.do_gurobi_things()
+        gurobi.generate_feature_reporter_db()
+        gurobi.consolidate_scores_better()
+        # gurobi.do_gurobi_things()
 
     if args['classic']:
         # Search
@@ -286,7 +299,16 @@ def main():
         # todo: add option for iterations
         generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
         generate_constraints.import_res_idx_map()
-        generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'], iteration=True)
+
+        tolerance = int(args['--tolerances']) if args['--tolerances'] else 5
+        samples = int(args['--samples']) if args['--samples'] else 1
+        generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'],
+                                                                            constraints_to_generate=1000,
+                                                                            offset=0,
+                                                                            iteration=args['iteration'],
+                                                                            angle_dihedral_tolerance=tolerance,
+                                                                            angle_dihedral_sample_number=samples,
+                                                                            greasy_sampling=args['--greasy_sampling'])
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
