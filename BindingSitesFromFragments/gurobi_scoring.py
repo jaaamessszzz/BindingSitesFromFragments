@@ -35,9 +35,9 @@ class score_with_gurobi():
                                                  os.path.join(self.resources_dir, 'RosettaScripts', 'Two_body_residue_feature_reporter.xml'),
                                                  '-out:nooutput',
                                                  '-parser:script_vars',
-                                                 'target={}'.format(self.ligand_code),
+                                                 'target={}'.format(self.user_defined_dir),
                                                  '-l',
-                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/single_pose_list.txt'.format(self.ligand_code),
+                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/single_pose_list.txt'.format(self.user_defined_dir),
                                                  '-extra_res_fa',
                                                  './{}/Inputs/Rosetta_Inputs/Scoring_params/{}.params'.format(self.user_defined_dir, self.ligand_code)
                                                  ])
@@ -62,6 +62,7 @@ class score_with_gurobi():
             self.user_defined_dir), index_col=0)
         df.to_sql('residue_index_mapping', con=connection, if_exists='replace')
 
+        # todo: After looking into it, I'm pretty sure fa_rep is already weighted and I'm now underweighting it...
         cursor.execute(
             """CREATE TABLE relevant_2b_scores AS
             SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
