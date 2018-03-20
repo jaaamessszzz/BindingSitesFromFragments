@@ -74,7 +74,7 @@ class score_with_gurobi():
             score_types.score_type_name = 'hbond_bb_sc') 
             UNION 
             SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
-            residue_scores_2b.resNum2, score_types.score_type_name, (residue_scores_2b.score_value * 0.55) from residue_scores_2b
+            residue_scores_2b.resNum2, score_types.score_type_name, (residue_scores_2b.score_value * 1.00) from residue_scores_2b
             left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where 
             (score_types.score_type_name = 'fa_rep')
             """
@@ -90,8 +90,8 @@ class score_with_gurobi():
             """
             SELECT struct_id, resNum1, resNum2, 
             CASE
-            WHEN round(sum(score_value), 4) >= 0 THEN 1
-            ELSE round(sum(score_value), 4)
+            WHEN sum(score_value) >= 0 THEN 1
+            ELSE sum(score_value)
             END 
             as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
             """, connection)

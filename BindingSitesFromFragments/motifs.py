@@ -725,7 +725,7 @@ class Generate_Constraints():
 
         if not iteration:
             gurobi_solutions = gurobi_solutions.sort_values(by=['Obj_score'], ascending=True).head(n=constraints_to_generate + offset).tail(constraints_to_generate)
-            
+
         # Group dataframe by conformer
         for current_conformer, conformer_df in gurobi_solutions.groupby(['Conformer']):
 
