@@ -394,7 +394,20 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
 
                         # Fetched PDBs can still be empty somehow...
                         if align.ideal_ligand_pdb is None:
+                            with open(rejected_list_path, 'a+') as reject_list:
+                                reject_list.write('{}\n'.format(pdbid))
                             print('REJECTED - the idealized target from LigandExpo is messed up or missing')
+                            continue
+
+                        try:
+                            ideal_ligand_prody = prody.parsePDBStream(align.ideal_ligand_pdb)
+                            align.ideal_ligand_pdb.seek(0)
+
+                        except Exception as e:
+                            print('{}: {}'.format(pdbid, e))
+                            with open(rejected_list_path, 'a+') as reject_list:
+                                reject_list.write('{}\n'.format(pdbid))
+                            print('REJECTED - the idealized target from LigandExpo icannot be parsed with prody')
                             continue
 
                         # Extract HETATM and CONECT records for the target ligand
@@ -408,6 +421,7 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                             with open(rejected_list_path, 'a+') as reject_list:
                                 reject_list.write('{}\n'.format(pdbid))
                             print('REJECTED - no target ligands were fully represented in the PDB')
+                            continue
 
                         # Get Ligand information from the PDB (SMILES strings specifically)
                         try:
@@ -453,6 +467,10 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                             # Apply transformation to protein_ligand complex if rmsd if below cutoff
                             rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
                             print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
+
+                            # DEBUGGING
+                            sys.exit()
+
                             if rmsd < rmsd_cutoff:
                                 align.apply_transformation(transformation_matrix)
                             else:

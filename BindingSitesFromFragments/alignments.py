@@ -199,7 +199,7 @@ class Align_PDB():
 
         # Map ideal ligand to pdb ligand, assert 1:1 mapping excluding hydrogens
         ligand_ideal = Chem.MolFromSmiles(self.target_ligand_dict['smiles'])
-        ligand_pdb = Chem.MolFromPDBBlock(self.ideal_ligand_pdb.getvalue(), removeHs=True)
+        ligand_pdb = Chem.MolFromPDBBlock(self.target_string, removeHs=True)
 
         # I need to generalize bond types since importing mol from a PDB fucks up valence information and things don't
         # map properly: https://github.com/rdkit/rdkit/issues/943
@@ -215,39 +215,29 @@ class Align_PDB():
 
         ideal_pdb_mapping = {i_idx: p_idx for i_idx, p_idx in zip(ligand_ideal_match, ligand_pdb_match)}
 
+        # Map Fragment SMILES onto fragment PDB
+        fragment_ideal = Chem.MolFromSmiles(fragment_smiles)
+        fragment_pdb = Chem.MolFromPDBBlock(self.fragment_string, removeHs=True)
+
+        fragment_mcs = rdFMCS.FindMCS([fragment_ideal, fragment_pdb], bondCompare=rdFMCS.BondCompare.CompareAny)
+        fragment_substructure_mol = Chem.MolFromSmarts(fragment_mcs.smartsString)
+
+        fragment_ideal_match = fragment_ideal.GetSubstructMatch(fragment_substructure_mol)
+        fragment_pdb_match = fragment_pdb.GetSubstructMatch(fragment_substructure_mol)
+
+        if len(fragment_ideal_match) != len(fragment_pdb_match):
+            return False
+
+        ideal_fragment_mapping = {i_idx: p_idx for i_idx, p_idx in zip(fragment_ideal_match, fragment_pdb_match)}
+
         # Map fragment SMILES onto ideal ligand SMILES
-
-        # Import fragment and target ligand
-        fragment_mol = Chem.MolFromSmiles(fragment_smiles)
-        target_mol = Chem.MolFromSmiles(self.target_ligand_dict['smiles'])
-
-        from rdkit.Chem import Draw
-        Draw.MolToFile(fragment_mol, 'fragment_mol.png')
-        Draw.MolToFile(target_mol, 'target_mol.png')
-
-        # Some ligands retrieved from LigandExpo have weird valence issues with RDKit... need to look into that
-        # 3dyb_AD0_1_A_500__B___.ipdb
-        # Oh hey this ligand was an issue anyways. Yay. I guess.
-        # Anyways, here's another if statement
-        if target_mol == None:
-            return False
-
-        # Debugging
-        # For some reason 3dyb_AD0_1_A_500__B___.ipdb cannot be imported with RDKit...
-        # Skipping for now...
-        if target_mol == None or fragment_mol == None:
-            return False
-
         # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
-        # substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol])
-        substructure_match = rdFMCS.FindMCS([fragment_mol, target_mol], ringMatchesRingOnly=True)
+        substructure_match = rdFMCS.FindMCS([fragment_ideal, ligand_ideal])
         sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
 
-        Draw.MolToFile(sub_mol, 'substructure_mol.png')
-
         # Return atom indicies of substructure matches for fragment and target
-        frag_matches = fragment_mol.GetSubstructMatch(sub_mol)
-        target_matches = target_mol.GetSubstructMatches(sub_mol)
+        frag_matches = fragment_ideal.GetSubstructMatch(sub_mol)
+        target_matches = ligand_ideal.GetSubstructMatches(sub_mol)
 
         # Maps fragment atom index to target atom index
         # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
@@ -255,9 +245,7 @@ class Align_PDB():
 
         # This will map fragment atoms to pdb atom indicies
         # fragment_target_map = [[(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
-        fragment_target_map = [[(f_idx, ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
-
-        print([a.GetSymbol() for a in sub_mol.GetAtoms()])
+        fragment_target_map = [[(ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
 
         # if len(target_matches) > 1:
         #     fragment_target_map = self.identify_best_substructure(frag_matches, target_matches)
@@ -267,11 +255,6 @@ class Align_PDB():
 
         # Assign successful mappings to self
         self.fragment_target_map = fragment_target_map
-
-        # todo: this appears to be trash
-        # target_mol = Chem.AddHs(target_mol_H)
-        # target_mol_PDB_Block = Chem.MolToPDBBlock(target_mol)
-        # self.target_mol_PDB_Block = target_mol_PDB_Block
 
         # Fragment and target as prody atom objects
         self.target_prody = prody.parsePDBStream(io.StringIO(self.target_string)).select('not hydrogen')
@@ -454,10 +437,10 @@ class Fragment_Alignments(Align_PDB):
             return io.StringIO(ideal_pdb_text)
 
         # For whenever I figure out how to install ProDy 1.9 without getting stupid build errors...
-        else:
-            ideal_cif_text = requests.get(
-                'https://files.rcsb.org/ligands/view/{}.cif'.format(ligand), stream=False).text
-            return io.StringIO(ideal_cif_text)
+        # else:
+        #     ideal_cif_text = requests.get(
+        #         'https://files.rcsb.org/ligands/view/{}.cif'.format(ligand), stream=False).text
+        #     return io.StringIO(ideal_cif_text)
 
 
 class Second_Shell_Alignments(Align_PDB):
