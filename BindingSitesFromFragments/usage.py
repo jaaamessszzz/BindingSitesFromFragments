@@ -135,10 +135,13 @@ import docopt
 import os
 import sys
 import pprint
+import re
 import yaml
 import shutil
 import pandas as pd
 import appdirs
+import xmltodict
+import urllib
 
 from .fragments import Fragments
 from .alignments import Fragment_Alignments
@@ -156,7 +159,7 @@ def main():
     args = docopt.docopt(__doc__)
 
     # Get ligand three-letter code
-    ligand_code = args['<user_defined_dir>'][:3]
+    # ligand_code = args['<user_defined_dir>'][:3]
 
     if args['<user_defined_dir>']:
         working_directory = os.path.join(os.path.curdir, args['<user_defined_dir>'])
@@ -171,7 +174,7 @@ def main():
         os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Rosetta_Inputs'))
         os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs'))
         os.makedirs(os.path.join(project_root_dir, 'Inputs', 'User_Inputs'))
-        with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_Inputs.csv'), 'w') as fragment_inputs:
+        with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_inputs.csv'), 'w') as fragment_inputs:
             fragment_inputs.write('Fragment, SMILES_fragment')
 
     if args['generate_fragments']:
@@ -303,7 +306,7 @@ def main():
         tolerance = int(args['--tolerances']) if args['--tolerances'] else 5
         samples = int(args['--samples']) if args['--samples'] else 1
         generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'],
-                                                                            constraints_to_generate=1000,
+                                                                            constraints_to_generate=2000,
                                                                             offset=0,
                                                                             iteration=args['iteration'],
                                                                             angle_dihedral_tolerance=tolerance,
@@ -312,9 +315,11 @@ def main():
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
+# todo: really, fix this. This is disgusting.
 def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
     """
     Consequences of not thinking ahead...
+
     :param args: 
     :param rmsd_cutoff: fragment alignment RMSD cutoff, anything higher gets rejected 
     :return: 
@@ -331,9 +336,15 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
         with open(exclude_txt, 'r') as exlude_ligands:
             exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
 
+    # Open Fragment_inputs.csv
+    fragment_inputs_path = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
+    fragment_df = pd.read_csv(os.path.join(fragment_inputs_path, 'Fragment_inputs.csv'))
+
+    # Sanitized SMILES strings
+    sanitized_smiles_dict = {'Fragment_{}'.format(row['Fragment']): re.sub(r'[^\[\]]+(?=\])', lambda x: '{0}'.format(x.group().split(';')[0]), row['SMILES_fragment']) for index, row in fragment_df.iterrows()}
+
     # Fragment_1, Fragment_2, ...
     for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
-        fragment_pdb = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
         current_fragment = os.path.basename(fragment)
 
         # Create directory for processed PDBs
@@ -381,6 +392,11 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                             print('REJECTED - something went wrong with fetching the idealized target from LigandExpo')
                             continue
 
+                        # Fetched PDBs can still be empty somehow...
+                        if align.ideal_ligand_pdb is None:
+                            print('REJECTED - the idealized target from LigandExpo is messed up or missing')
+                            continue
+
                         # Extract HETATM and CONECT records for the target ligand
                         # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
 
@@ -393,13 +409,37 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                                 reject_list.write('{}\n'.format(pdbid))
                             print('REJECTED - no target ligands were fully represented in the PDB')
 
+                        # Get Ligand information from the PDB (SMILES strings specifically)
+                        try:
+                            search_request = urllib.request.Request('https://www.rcsb.org/pdb/rest/ligandInfo?structureId={0}'.format(pdbid))
+                            search_result = urllib.request.urlopen(search_request, data=None, timeout=300).read()
+                            pdb_ligand_dict = xmltodict.parse(search_result)
+
+                            target_ligand_dict = {}
+                            ligand_dicts = pdb_ligand_dict['structureId']['ligandInfo']['ligand']
+
+                            # PDB REST only returns a list if there's more than one ligand... or maybe it's XMLtoDict...
+                            ligand_dict_list = ligand_dicts if type(ligand_dicts) is list else [ligand_dicts]
+
+                            for dict in ligand_dict_list:
+                                if dict['@chemicalID'] == ligand:
+                                    target_ligand_dict = dict
+                                    break
+
+                            if target_ligand_dict == {}:
+                                raise Exception('Failed to retrieve ligand information from the PDB for {0}: {1}!'.format(pdbid,fcc))
+
+                            align.target_ligand_dict = target_ligand_dict
+
+                        except Exception as e:
+                            print('Issue retrieving ligand information from the PDB...')
+                            print('{}: {}'.format(pdbid, e))
 
                         # Continue if PDB has not been processed, rejected, or excluded by the user
                         else:
                             # Mapping of fragment atoms to target ligand atoms
-                            align.fragment_string = open(
-                                os.path.join(fragment_pdb, '{}.pdb'.format(current_fragment))).read()
-                            mapping_successful = align.fragment_target_mapping()
+                            align.fragment_string = open(os.path.join(fragment_inputs_path, '{}.pdb'.format(current_fragment))).read()
+                            mapping_successful = align.fragment_target_mapping(sanitized_smiles_dict[current_fragment])
 
                             if not mapping_successful:
                                 with open(rejected_list_path, 'a+') as reject_list:
