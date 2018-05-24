@@ -719,9 +719,10 @@ class Generate_Constraints():
         gurobi_solutions = pd.DataFrame(columns=['Obj_score', 'Residue_indicies', 'Conformer'])
 
         for solution_set in os.listdir(gurobi_solutions_csv_dir):
-            # todo: only try to open csv files!!! Ran into issue with hidden files...
-            temp_solution_df = pd.read_csv(os.path.join(gurobi_solutions_csv_dir, solution_set), usecols=['Obj_score', 'Residue_indicies', 'Conformer'])
-            gurobi_solutions = gurobi_solutions.append(temp_solution_df, ignore_index=True)
+            if solution_set.endswith('.csv'):
+                # todo: only try to open csv files!!! Ran into issue with hidden files...
+                temp_solution_df = pd.read_csv(os.path.join(gurobi_solutions_csv_dir, solution_set), usecols=['Obj_score', 'Residue_indicies', 'Conformer'])
+                gurobi_solutions = gurobi_solutions.append(temp_solution_df, ignore_index=True)
 
         if not iteration:
             gurobi_solutions = gurobi_solutions.sort_values(by=['Obj_score'], ascending=True).head(n=constraints_to_generate + offset).tail(constraints_to_generate)
@@ -1473,7 +1474,9 @@ class Generate_Motif_Residues(Generate_Constraints):
 
                         # todo: fix this as well... so hacky.
                         if generate_reference_pose:
+                            # todo: keep track of RMSD and atom types for matcher atoms
                             transformed_motif = deepcopy_residue
+
                         else:
                             # Get translation and rotation for fragment onto conformer
                             residue_index_row = self.res_idx_map_df.loc[self.res_idx_map_df['source_pdb'] == cluster_member_tuple[0]] # & self.res_idx_map_df['source_conformer'] == conformer_name]
