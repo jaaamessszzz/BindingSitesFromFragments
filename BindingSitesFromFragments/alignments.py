@@ -144,6 +144,7 @@ class Align_PDB():
                     atom_count += 1
 
             # If the number of atoms are the same, good enough for me (at the moment)
+            self.ideal_ligand_pdb.seek(0)
             ideal_ligand_prody = prody.parsePDBStream(self.ideal_ligand_pdb)
             if atom_count == ideal_ligand_prody.select('not hydrogen').numAtoms():
 
@@ -201,6 +202,10 @@ class Align_PDB():
         ligand_ideal = Chem.MolFromSmiles(self.target_ligand_dict['smiles'])
         ligand_pdb = Chem.MolFromPDBBlock(self.target_string, removeHs=True)
 
+        if ligand_pdb is None:
+            print('\nUnable to load ligand PDB as an RDKit mol object...\n')
+            return False
+
         # I need to generalize bond types since importing mol from a PDB fucks up valence information and things don't
         # map properly: https://github.com/rdkit/rdkit/issues/943
 
@@ -209,6 +214,10 @@ class Align_PDB():
 
         ligand_ideal_match = ligand_ideal.GetSubstructMatch(ligand_substructure_mol)
         ligand_pdb_match = ligand_pdb.GetSubstructMatch(ligand_substructure_mol)
+
+        if len(ligand_ideal_match) != len([a for a in ligand_ideal.GetAtoms()]):
+            print('\nFull ligand was not mapped!\n')
+            return False
 
         if len(ligand_ideal_match) != len(ligand_pdb_match):
             return False
@@ -235,23 +244,37 @@ class Align_PDB():
         substructure_match = rdFMCS.FindMCS([fragment_ideal, ligand_ideal])
         sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
 
+        # This should catch instances where the full fragment can't be mapped due to inconsistencies with the provided
+        # SMILES strings... I've found that this is particularly an issue for matching aromatic bonds since the SMILES
+        # strings are converted to kekule structures.
+
+        # Fall back onto mapping without considering bond order
+        if len(sub_mol.GetAtoms()) != len(fragment_ideal_match):
+            print('\nUnable to match fragment with correct bond orders, let\'s try ignoring them...\n')
+            substructure_match = rdFMCS.FindMCS([fragment_ideal, ligand_ideal], bondCompare=rdFMCS.BondCompare.CompareAny)
+            sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
+
+            if len(sub_mol.GetAtoms()) != len(fragment_ideal_match):
+                print('\nFailed to correctly map fragment onto target molecule...\n')
+                return False
+
         # Return atom indicies of substructure matches for fragment and target
         frag_matches = fragment_ideal.GetSubstructMatch(sub_mol)
         target_matches = ligand_ideal.GetSubstructMatches(sub_mol)
 
-        # Maps fragment atom index to target atom index
-        # If there is more than one substructure match for the target, find the one with the lowest RMSD to the fragment
-        # todo: use all mappings since each will have a unique local environment in the binding site, will also solve symmetric fragment issue
-
-        # This will map fragment atoms to pdb atom indicies
-        # fragment_target_map = [[(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
-        fragment_target_map = [[(ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
-
-        # if len(target_matches) > 1:
-        #     fragment_target_map = self.identify_best_substructure(frag_matches, target_matches)
+        # DEBUGGING
+        # from rdkit.Chem import Draw
+        # from rdkit.Chem.Draw.MolDrawing import MolDrawing, DrawingOptions
+        # DrawingOptions.includeAtomNumbers = True
         #
-        # else:
-        #     fragment_target_map = [(f_idx, t_idx) for f_idx, t_idx in zip(frag_matches, target_matches[0])]
+        # Draw.MolToFile(fragment_ideal, 'fragment_ideal.png')
+        # Draw.MolToFile(fragment_pdb, 'fragment_pdb.png')
+        # Draw.MolToFile(fragment_substructure_mol, 'fragment_substructure_mol.png')
+        # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
+        # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
+
+        # Maps fragment atom index to target atom index
+        fragment_target_map = [[(ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
 
         # Assign successful mappings to self
         self.fragment_target_map = fragment_target_map
@@ -291,20 +314,12 @@ class Align_PDB():
 
     def process_atom_mappings_into_coordinate_sets(self, fragment_target_map):
         # Retrieve fragment and target atom indicies to align
-        fragment_atom_indices = [a[0] for a in fragment_target_map[0]]
-        target_atom_indices = [a[1] for a in fragment_target_map[0]]
+        fragment_atom_indices = [a[0] for a in fragment_target_map]
+        target_atom_indices = [a[1] for a in fragment_target_map]
 
         # Convert atom indicies into atom objects
         frag_atom_selections = [self.fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
         trgt_atom_selections = [self.target_prody.select('index {}'.format(index)) for index in target_atom_indices]
-
-        # DEBUGGING - Export PDBs
-        # os.makedirs(os.path.join('ONPF', 'Mapped_atoms'), exist_ok=True)
-        # trgt_mapped_pdb = self.target_prody.select('index {}'.format(' '.join([str(a) for a in target_atom_indices])))
-        # frag_mapped_pdb = self.fragment_prody.select('index {}'.format(' '.join([str(a) for a in fragment_atom_indices])))
-        #
-        # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-fragment.pdb'.format(self.pdb_file)), frag_mapped_pdb)
-        # prody.writePDB(os.path.join('ONPF', 'Mapped_atoms', '{}-target.pdb'.format(self.pdb_file)), trgt_mapped_pdb)
 
         # Save atom names for mapped fragment atoms in target ligand
         self.target_fragment_atom_names = ' '.join([atom.getNames()[0] for atom in trgt_atom_selections if atom != None])
@@ -317,7 +332,7 @@ class Align_PDB():
 
         return frag_atom_coords, trgt_atom_coords
 
-    def determine_rotation_and_translation(self, current_fragment=None):
+    def determine_rotation_and_translation(self, fragment_target_map, current_fragment=None):
         """
         Implementing the Kabsch algorithm for aligning all fragment-containing small molecules to the target ligand
         on the mapped atoms as determined by fragment_target_mapping()
@@ -325,7 +340,7 @@ class Align_PDB():
         :return: Prody transformation object with rotation and translation matrix/vector
         """
         # todo: implement an option for RMSD cutoff where mapped atoms do not necessarily have the same conformations, e.g. sugar pucker
-        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(self.fragment_target_map)
+        frag_atom_coords, trgt_atom_coords = self.process_atom_mappings_into_coordinate_sets(fragment_target_map)
 
         # Select rigid atoms from fragment map for alignments if rigid atoms are defined in the Fragment_Inputs directory
         frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
@@ -378,8 +393,7 @@ class Align_PDB():
 
         return np.asarray(frag_atom_rigid), np.asarray(trgt_atom_rigid)
 
-
-    def apply_transformation(self, transformation_matrix):
+    def apply_transformation(self, transformation_matrix, mapping_count=1):
         """
         Apply transformation to the target ligand-protein complex.
 
@@ -397,7 +411,7 @@ class Align_PDB():
         target_shell = target_pdb.select('(protein and within 12 of (serial {0}) and not resnum {1}) or (serial {0})'.format(self.target_fragment_atom_serials, ligand_resnum))
 
         transformed_pdb = prody.applyTransformation(transformation_matrix, target_shell)
-        prody.writePDB(os.path.join(self.processed_PDBs_path, '{}-processed.pdb'.format(self.lig_request_suffix)), transformed_pdb)
+        prody.writePDB(os.path.join(self.processed_PDBs_path, '{0}-{1}-processed.pdb'.format(self.lig_request_suffix, mapping_count)), transformed_pdb)
 
         return transformed_pdb
 

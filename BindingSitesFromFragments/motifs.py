@@ -41,32 +41,55 @@ class Generate_Constraints():
                                           usecols=['residue_index', 'source_conformer', 'source_pdb', 'struct_id']
                                           )
 
-    def determine_constraint_atoms(self, single_pose_prody, current_conformer, current_residue_index, verbose=False):
+    def determine_constraint_atoms_from_single_pose(self, single_pose_prody, current_conformer, current_residue_index, verbose=False):
         """
-        Determine the three atoms in the ligand and the residue that will be used to calculate ideal values for the DOFs
-        required for matcher. 
-        
+        Use single pose to determine the three atoms on the ligand and residue to use for matcher constraints
+
         :param single_pose_prody: prody object of single pose for current conformer
         :param current_conformer: name of current conformer e.g. MEH_0001
         :param current_residue_index: residue number for current residue in single pose
-        :return: 
+        :return:
         """
-        ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
-
-        # Get residue prody
         residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(current_residue_index)).copy()
-
         residue_index_row = self.res_idx_map_df.loc[(self.res_idx_map_df['residue_index'] == current_residue_index) &
                                                     (self.res_idx_map_df['source_conformer'] == current_conformer)]
         residue_split = re.split('-|\.', residue_index_row['source_pdb'].values[0])
 
         # For representative residues or cluster-sourced
-        # todo: should probably add an option for this instead of relying of len(split)...
+        # EDIT: if any of the MySQL crap doesn't work anymore, this is why.
         source_pdb = residue_index_row['source_pdb'].values[0]
-        residue_index = residue_split[0] if len(residue_split) == 7 else 0
-        fragment = residue_split[2] if len(residue_split) == 7 else residue_split[0]
-        cluster = residue_split[3] if len(residue_split) == 7 else residue_split[1]
+        residue_index = int(residue_split[2].split('_')[1])
+        fragment = residue_split[0]
+        cluster = residue_split[1]
         resname = residue_prody.getResnames()[0]
+
+        constraints_dict = self._determine_constraint_atoms(residue_prody, current_conformer, fragment)
+
+        constraints_dict['source_pdb'] = source_pdb
+        constraints_dict['residue_index'] = residue_index
+        constraints_dict['fragment'] = fragment
+        constraints_dict['cluster'] = cluster
+        constraints_dict['resname'] = resname
+
+        return constraints_dict
+
+    def _determine_constraint_atoms(self, residue_prody, current_conformer, fragment, verbose=False):
+        """
+        Determine the three atoms in the ligand and the residue that will be used to calculate ideal values for the DOFs
+        required for matcher. 
+
+        :param residue_prody: prody object of residue
+        :param current_conformer: string of current ligand conformer (e.g. "MEH_0001")
+        :param fragment: string of current fragment (e.g. "Fragment_1")
+        :return: 
+        """
+
+        # I need:
+        # prody obect of residue
+        # prody object of ligand
+        # All that source PDB/fragment/cluster/resname information
+
+        ligand_code = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
 
         # Get conformer prody
         # todo: fix conformer_io indicies
@@ -102,7 +125,7 @@ class Generate_Constraints():
         fragment_atoms_prody = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', '{}.pdb'.format(fragment)))
         fragment_atom_names = fragment_atoms_prody.select('not hydrogen').getNames()
 
-        conformer_fragment_atoms = single_pose_prody.select('resname {} and name {}'.format(ligand_code, ' '.join(fragment_atom_names)))
+        conformer_fragment_atoms = fragment_source_conformer.select('resname {} and name {}'.format(ligand_code, ' '.join(fragment_atom_names)))
         contact_distance, residue_index_low, ligand_index_low = minimum_contact_distance(residue_prody, conformer_fragment_atoms, return_indices=True)
 
         # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
@@ -148,7 +171,7 @@ class Generate_Constraints():
         else:
             residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
             residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
-        
+
         # debugging
         # pprint.pprint(ligand_atom_list)
         # pprint.pprint(ligand_contact_atom)
@@ -157,8 +180,6 @@ class Generate_Constraints():
         ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, conformer_fragment_atoms)
 
         if verbose:
-            print(current_conformer)
-            print(source_pdb)
 
             # So I derped, residue_index_low and ligand_index_low are indices from the distance matrix and do not
             # necessarily correspond to residue/ligand atom indicies... just happened to work for residues since most
@@ -181,12 +202,7 @@ class Generate_Constraints():
             print('LIGAND - SECOND ATOM: {} {}'.format(ligand_second_atom, ligand_index_atom_map[ligand_second_atom]))
             print('LIGAND - THIRD ATOM: {} {}'.format(ligand_third_atom, ligand_index_atom_map[ligand_third_atom]))
 
-        return {'source_pdb': source_pdb,
-                'residue_index': residue_index,
-                'fragment': fragment,
-                'cluster': cluster,
-                'resname': resname,
-                'contact_distance': float(contact_distance),
+        return {'contact_distance': float(contact_distance),
                 'ligand': {'atom_names': [ligand_index_atom_map[ligand_contact_atom.getIndex()],
                                           ligand_index_atom_map[ligand_second_atom],
                                           ligand_index_atom_map[ligand_third_atom]
@@ -333,7 +349,7 @@ class Generate_Constraints():
         Generate a single constraint block for one residue-ligand interaction
         :return: 
         """
-        constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, residue_index)
+        constraint_atoms_dict = self.determine_constraint_atoms_from_single_pose(single_pose_prody, current_conformer, residue_index)
         ligand = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
         ligand_prody = single_pose_prody.select('resname {}'.format(ligand)).copy()
         residue_prody = single_pose_prody.select('resnum {}'.format(residue_index)).copy()
@@ -622,7 +638,7 @@ class Generate_Constraints():
 
                 for cluster_residue in residue_row_indices:
                     residue_index = fragment_cluster_groups.get_group(solution_tuple).loc[cluster_residue, 'residue_index']
-                    constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, conformer, residue_index, verbose=False)
+                    constraint_atoms_dict = self.determine_constraint_atoms_from_single_pose(single_pose_prody, conformer, residue_index, verbose=False)
                     residue_contact_list.append(tuple(constraint_atoms_dict['residue']['atom_names']))
                     ligand_contact_list.append(tuple(constraint_atoms_dict['ligand']['atom_names']))
 
@@ -937,23 +953,6 @@ class Generate_Motif_Residues(Generate_Constraints):
 
         return representative_residue
 
-    def prepare_motifs_for_conformers(self):
-        """
-        Prepare things for conformer binding site generation
-        :return: 
-        """
-        os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
-
-        # Generate transformation dict
-        self.conformer_transformation_dict = self.generate_motif_transformation_dict()
-
-        # Generate poses for representative residues only
-        self.generate_residue_residue_clash_matrix(actually_generate_matrix=True)
-        self.import_res_idx_map()
-        self.generate_residue_ligand_clash_list()
-        self.score_residue_ligand_interactions()
-        self.generate_residue_ligand_constraints()
-
     def single_pose_cluster_residue_dump(self):
         """
         Generate single pose containing all residues from selected clusters for each conformer
@@ -961,38 +960,6 @@ class Generate_Motif_Residues(Generate_Constraints):
         """
         self.conformer_transformation_dict = self.generate_motif_transformation_dict(pose_from_clusters=False)
         self.generate_single_pose_from_selected_clusters()
-
-    def generate_residue_ligand_clash_list(self, cutoff_distance=2):
-        """
-        Filters representative motif residues that are clashing with the ligand for each conformer in Inputs/Rosetta_Inputs
-        Outputs a yaml file for each conformer with a list of motif residue indicies that clash
-        Clashing is determined by a distance cutoff for the closest atom-atom distance between each residue and the ligand
-        
-        :param motif_residue_dir: directory with representative motif residue PDBs
-        :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
-        :return: 
-        """
-        # Generate and output a yaml file for each conformer and list which residues clash
-        # This way I can output all representative motif residues once and just ignore the ones that clash for each conformer
-        # YAML will be a dict with conformer pdbs as keys and list of residue indices as values
-
-        residue_ligand_clash_dict = {}
-
-        target_molecule = os.path.normpath(self.user_defined_dir)
-        for conformer in directory_check(self.residue_ligand_interactions_dir):
-            clashing_residue_indices = []
-            for motif_residue in pdb_check(conformer):
-                interaction_prody = prody.parsePDB(motif_residue)
-                residue_prody = interaction_prody.select('protein')
-                ligand_prody = interaction_prody.select('hetero')
-
-                if minimum_contact_distance(residue_prody, ligand_prody) <= cutoff_distance:
-                    residue_index = re.split('-|\.', os.path.basename(motif_residue))[1]
-                    clashing_residue_indices.append(residue_index)
-
-            residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
-
-        yaml.dump(residue_ligand_clash_dict, open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
 
     def generate_motif_transformation_dict(self, pose_from_clusters=False):
         """
@@ -1006,6 +973,8 @@ class Generate_Motif_Residues(Generate_Constraints):
 
         # Generate single pose with either representative motif residues or cluster residues
         motif_residue_list = []
+
+        # Representative Residues (NOT SUPPORTED ANYMORE, OLD AF)
         if os.path.exists(self.motif_residue_dir) and not pose_from_clusters:
             for representative_residue in pdb_check(self.motif_residue_dir, base_only=True):
                 motif_residue_list.append((representative_residue,
@@ -1015,6 +984,7 @@ class Generate_Motif_Residues(Generate_Constraints):
             conformer = os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs', '{}_0001.pdb'.format(ligand_code))
             self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True, generate_reference_pose=True)
 
+        # Single pose from cluster residues
         else:
             reference_pose_dir = os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose')
             if os.path.exists(reference_pose_dir):
@@ -1037,7 +1007,7 @@ class Generate_Motif_Residues(Generate_Constraints):
 
             for motif_residue in single_pose_hv.iterResidues():
                 if motif_residue.getResname() != ligand_code:
-                    constraint_atoms_dict = self.determine_constraint_atoms(single_pose_prody, current_conformer, motif_residue.getResnum(), verbose=False)
+                    constraint_atoms_dict = self.determine_constraint_atoms_from_single_pose(single_pose_prody, current_conformer, motif_residue.getResnum(), verbose=False)
                     ligand_constraint_atoms_dict[motif_residue.getResnum()] = constraint_atoms_dict['ligand']['atom_names']
             break # Redundant
 
@@ -1122,134 +1092,6 @@ class Generate_Motif_Residues(Generate_Constraints):
                 conformer_transformation_dict[conformer_name][key] = prody.Transformation(rotation_matrix, np.ravel(translation_vector))
 
         return conformer_transformation_dict
-
-    # DEPRECIATED
-    def transform_motif_residues_onto_fragments(self):
-        """
-        Exactly what is says!
-        
-        :return: 
-        """
-        # Precalculate transformation matrices for each fragment for each conformer
-        conformer_transformation_dict = {}
-
-        # Open fragment prodys and stick them in a dicitonary
-        fragment_prody_dict = {}
-
-        # First need to do translation and rotation of all motif residues relative to fragments in new conformations
-        # Select atom names used for matcher constraints...
-        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
-            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
-            conformer_transformation_dict[conformer_name] = {}
-
-            for fragment in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')):
-                # Map fragment onto conformer
-                # Add fragment prody to fragment_prody_dict
-                fragment_name = os.path.basename(os.path.normpath(fragment)).split('.')[0]
-                fragment_prody_dict[fragment_name] = prody.parsePDB(fragment)
-
-                # Determine transformation for fragment onto conformer
-                align = Align_PDB(self.user_defined_dir)
-
-                # Select fragment atoms from conformer
-                conformer_prody = prody.parsePDB(conformer)
-                fragment_prody = prody.parsePDB(fragment)
-                fragment_prody_atoms_names = fragment_prody.getNames()
-                corresponding_target_atoms = conformer_prody.select('name {}'.format(' '.join(fragment_prody_atoms_names)))
-
-                frag_atom_coords = fragment_prody.getCoords()
-                trgt_atom_coords = corresponding_target_atoms.getCoords()
-
-                # Align only on rigid atoms (if they are defined in Rigid_Fragment_Atoms dir)
-                frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
-
-                if os.path.exists(frag_inputs_dir):
-                    frag_rigid_pdb_name = '{}-rigid.pdb'.format(fragment_name)
-
-                    if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
-                        frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords, trgt_atom_coords)
-
-                        transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
-
-                    else:
-                        transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
-
-                else:
-                    transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
-
-                conformer_transformation_dict[conformer_name][fragment_name] = transformation
-
-                # Debugging: Outputs PDBs of fragment transformed onto corresponding atoms on conformer
-                # import io
-                # os.makedirs(os.path.join(self.user_defined_dir, 'Conformer_Tests'), exist_ok=True)
-                # transformed_fragment = prody.applyTransformation(transformation, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
-                # prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
-
-        return conformer_transformation_dict
-
-    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2, actually_generate_matrix=True):
-        """
-        Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
-        based on the distance of the closest atom-atom interaction between two residues.
-        Matrix is output as a .csv that can be imported with numpy.
-        
-        :param motif_residue_dir: directory with representative motif residue PDBs
-        :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
-        :return: 
-        """
-
-        residue_residue_clash_dict = {}
-
-        # touch text file to keep track of paths for PDBs to score
-        open(self.score_interactions_list_path, 'w').close()
-
-        # Import residue_index_mapping for reference pose
-        residue_index_mapping_df = pd.read_csv(os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose', 'residue_index_mapping.csv'))
-
-        # Okay so for the actually residue-residue clashing stuff for each conformer
-        # For each conformer I want to determine motif clashes with...
-        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'), conformer_check=True):
-            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
-
-            # For each residue...
-            # Make a list of all transformed prody motif residues, then pass to minimum_contact_distance()
-            motif_residue_list = []
-            for motif_residue in pdb_check(os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')):
-
-                motif_prody = prody.parsePDB(motif_residue)
-
-                # Get residue index from residue_index_mapping_df
-                residue_index_row = residue_index_mapping_df.loc[residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(motif_residue))] # & residue_index_mapping_df['source_conformer'] == conformer_name
-                residue_index = residue_index_row['residue_index'].values[0]
-
-                print(motif_prody, residue_index)
-
-                # Get translation and rotation for fragment onto conformer
-                transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
-
-                transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
-                motif_residue_list.append((os.path.basename(os.path.normpath(motif_residue)), transformed_motif))
-
-            # Generate residue-conformer PDBs for scoring here so I don't have to regenerate the transformed residues...
-            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=True, generate_single_pose=True, generate_reference_pose=False)
-
-            if actually_generate_matrix == True:
-                residue_residue_clash_set = set()
-                for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
-                    for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
-                        outer_motif_index = int(outer_motif_tuple[0].split('-')[0])
-                        inner_motif_index = int(inner_motif_tuple[0].split('-')[0])
-                        if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
-
-                            # If clashing, append tuples in both orders... look up times? Whatever!
-                            if outer_motif_index != inner_motif_index:
-                                residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
-                                residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
-
-                residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
-
-        if actually_generate_matrix == True:
-            yaml.dump(residue_residue_clash_dict, open(os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
 
     def generate_residue_ligand_pdbs(self, conformer, motif_residue_list, generate_residue_ligand_pairs=False, generate_single_pose=False, generate_reference_pose=False):
         """
@@ -1374,48 +1216,6 @@ class Generate_Motif_Residues(Generate_Constraints):
                 with open(single_pose_list, 'a') as muh_list:
                     muh_list.write(pdb_output_path + '\n')
 
-    def score_residue_ligand_interactions(self):
-        """
-        Score each unique residue-ligand interaction with Rosetta and export to .csv (fa_atr, hbond_sc, fa_elec)   
-        :return: 
-        """
-        # Calculate scores for all PDBs in this new directory (batch process, don't forget .params)
-        current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
-        scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
-
-        # todo: make a config file where users can specify Rosetta path and other things...
-        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/score_jd2.{}'.format(self.user_config['Rosetta_compiler'])),
-                                          '-l',
-                                          self.score_interactions_list_path,
-                                          '-extra_res_fa',
-                                          os.path.join(self.rosetta_inputs_path, '{}.params'.format(current_ligand)),
-                                          # '-scorefile_format',
-                                          # 'json',
-                                          '-out:file:scorefile',
-                                          scores_dir,
-                                          '-out:file:score_only',
-                                          '-overwrite'
-                                          ])
-        run_jd2_score.wait()
-
-        # Process score file into a .csv that can be imported by numpy as a matrix
-        print('Raw score file outputted as {}!'.format(scores_dir))
-
-        score_df = pd.read_csv(scores_dir,
-                               delim_whitespace=True,
-                               index_col=5,
-                               usecols=['hbond_sc',
-                                        'hbond_bb_sc',
-                                        'fa_elec',
-                                        'fa_atr',
-                                        'fa_rep',
-                                        'description'],
-                               skiprows=0,
-                               header=1)
-
-        # Output only necessary scores to a .csv
-        score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
-
     def generate_single_pose_from_selected_clusters(self, generate_reference_pose=False):
         """
         20170829 - Now that I have Gurobi up and running, I want to see if I can use all residues from clusters in
@@ -1466,6 +1266,12 @@ class Generate_Motif_Residues(Generate_Constraints):
                 # For each "quality" cluster...
                 for cluster_index in fragment_prody_dict[dict_fragment]:
 
+                    print('\n\nEvaluating {}, cluster {}...\n\n'.format(dict_fragment, cluster_index))
+
+                    # List to keep track of resdiues that will be used for reference single_pose
+                    # ([atom_names], atom_coords, CA_coord)
+                    accepted_residues = []
+
                     # For each residue where (cluster_residue_name, cluster_residue_prody)...
                     for cluster_member_tuple in fragment_prody_dict[dict_fragment][cluster_index]:
 
@@ -1474,16 +1280,55 @@ class Generate_Motif_Residues(Generate_Constraints):
 
                         # todo: fix this as well... so hacky.
                         if generate_reference_pose:
-                            # todo: keep track of RMSD and atom types for matcher atoms
                             transformed_motif = deepcopy_residue
+                            print(transformed_motif)
+
+                            # Known issue with messed up residues in the PDB where neighbormap cannot be formed
+                            try:
+                                contraint_dict = self._determine_constraint_atoms(transformed_motif, conformer_name, dict_fragment, verbose=False)
+
+                            except Exception as e:
+                                print('\n\nThere was an error determining constraint atoms for the currrent residue\n{}\n\n'.format(e))
+                                continue
+
+                            relevant_residue_CA = transformed_motif.select('name CA')
+                            relevant_residue_atoms = transformed_motif.select('name {}'.format(' '.join(contraint_dict['residue']['atom_names'])))
+                            relevant_residue_atoms_coords = relevant_residue_atoms.getCoords()
+
+                            if len(accepted_residues) != 0:
+
+                                truthiness_list = [all(
+                                    (contraint_dict['residue']['atom_names'] == res_feature_tuple[0],
+                                     prody.calcRMSD(res_feature_tuple[1], relevant_residue_atoms_coords) < 0.75,
+                                     prody.calcDistance(res_feature_tuple[2], relevant_residue_CA)[0] < 1.5)
+                                ) for res_feature_tuple in accepted_residues]
+                                
+                                print(truthiness_list)
+                                print(any(truthiness_list))
+                                
+                                if any(truthiness_list):
+                                    print('\n{0} was found to be redundant!\n'.format(transformed_motif))
+                                    continue
+
+                                accepted_residues.append((contraint_dict['residue']['atom_names'], relevant_residue_atoms_coords, relevant_residue_CA))
+
+                            else:
+                                accepted_residues.append((contraint_dict['residue']['atom_names'], relevant_residue_atoms_coords, relevant_residue_CA))
 
                         else:
+                            # todo: add checks so only residues in reference pose are used for subsequent single poses
+                            # fragment_prody_dict is populated using raw residues from clustering
+                            # check against reference pose for non-redundant residues
                             # Get translation and rotation for fragment onto conformer
                             residue_index_row = self.res_idx_map_df.loc[self.res_idx_map_df['source_pdb'] == cluster_member_tuple[0]] # & self.res_idx_map_df['source_conformer'] == conformer_name]
 
-                            residue_index = residue_index_row['residue_index'].iloc[0]
-                            transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
+                            # Empty dataframe is returned if the residue is not represented in the reference pose
+                            if residue_index_row.empty:
+                                continue
 
+                            residue_index = residue_index_row['residue_index'].iloc[0]
+
+                            transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
                             transformed_motif = prody.applyTransformation(transformation_matrix, deepcopy_residue)
 
                         motif_residue_list.append((cluster_member_tuple[0], transformed_motif))
@@ -1493,6 +1338,241 @@ class Generate_Motif_Residues(Generate_Constraints):
                 break
             else:
                 self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_single_pose=True)
+
+    # DEPRECIATED
+    def prepare_motifs_for_conformers(self):
+        """
+        Prepare things for conformer binding site generation
+        :return:
+        """
+        os.makedirs(self.residue_ligand_interactions_dir, exist_ok=True)
+
+        # Generate transformation dict
+        self.conformer_transformation_dict = self.generate_motif_transformation_dict()
+
+        # Generate poses for representative residues only
+        self.generate_residue_residue_clash_matrix(actually_generate_matrix=True)
+        self.import_res_idx_map()
+        self.generate_residue_ligand_clash_list()
+        self.score_residue_ligand_interactions()
+        self.generate_residue_ligand_constraints()
+
+    # DEPRECIATED
+    def score_residue_ligand_interactions(self):
+        """
+        Score each unique residue-ligand interaction with Rosetta and export to .csv (fa_atr, hbond_sc, fa_elec)
+        :return:
+        """
+        # Calculate scores for all PDBs in this new directory (batch process, don't forget .params)
+        current_ligand = os.path.basename(os.path.normpath(self.user_defined_dir))
+        scores_dir = os.path.join(self.residue_ligand_interactions_dir, '{}_scores_raw.txt'.format(current_ligand))
+
+        # todo: make a config file where users can specify Rosetta path and other things...
+        run_jd2_score = subprocess.Popen([os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/score_jd2.{}'.format(self.user_config['Rosetta_compiler'])),
+                                          '-l',
+                                          self.score_interactions_list_path,
+                                          '-extra_res_fa',
+                                          os.path.join(self.rosetta_inputs_path, '{}.params'.format(current_ligand)),
+                                          # '-scorefile_format',
+                                          # 'json',
+                                          '-out:file:scorefile',
+                                          scores_dir,
+                                          '-out:file:score_only',
+                                          '-overwrite'
+                                          ])
+        run_jd2_score.wait()
+
+        # Process score file into a .csv that can be imported by numpy as a matrix
+        print('Raw score file outputted as {}!'.format(scores_dir))
+
+        score_df = pd.read_csv(scores_dir,
+                               delim_whitespace=True,
+                               index_col=5,
+                               usecols=['hbond_sc',
+                                        'hbond_bb_sc',
+                                        'fa_elec',
+                                        'fa_atr',
+                                        'fa_rep',
+                                        'description'],
+                               skiprows=0,
+                               header=1)
+
+        # Output only necessary scores to a .csv
+        score_df.to_csv(os.path.join(self.residue_ligand_interactions_dir, '{}_scores_df.csv'.format(current_ligand)))
+
+    # DEPRECIATED
+    def generate_residue_residue_clash_matrix(self, clashing_cutoff=2, actually_generate_matrix=True):
+        """
+        Generates a sparse matrix for all representative motif residues that clash with each other. This is determined
+        based on the distance of the closest atom-atom interaction between two residues.
+        Matrix is output as a .csv that can be imported with numpy.
+
+        :param motif_residue_dir: directory with representative motif residue PDBs
+        :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
+        :return:
+        """
+
+        residue_residue_clash_dict = {}
+
+        # touch text file to keep track of paths for PDBs to score
+        open(self.score_interactions_list_path, 'w').close()
+
+        # Import residue_index_mapping for reference pose
+        residue_index_mapping_df = pd.read_csv(
+            os.path.join(self.user_defined_dir, 'Motifs', 'Reference_Pose', 'residue_index_mapping.csv'))
+
+        # Okay so for the actually residue-residue clashing stuff for each conformer
+        # For each conformer I want to determine motif clashes with...
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'),
+                                   conformer_check=True):
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+
+            # For each residue...
+            # Make a list of all transformed prody motif residues, then pass to minimum_contact_distance()
+            motif_residue_list = []
+            for motif_residue in pdb_check(
+                    os.path.join(self.user_defined_dir, 'Motifs', 'Representative_Residue_Motifs')):
+                motif_prody = prody.parsePDB(motif_residue)
+
+                # Get residue index from residue_index_mapping_df
+                residue_index_row = residue_index_mapping_df.loc[
+                    residue_index_mapping_df['source_pdb'] == os.path.basename(os.path.normpath(
+                        motif_residue))]  # & residue_index_mapping_df['source_conformer'] == conformer_name
+                residue_index = residue_index_row['residue_index'].values[0]
+
+                print(motif_prody, residue_index)
+
+                # Get translation and rotation for fragment onto conformer
+                transformation_matrix = self.conformer_transformation_dict[conformer_name][residue_index]
+
+                transformed_motif = prody.applyTransformation(transformation_matrix, motif_prody)
+                motif_residue_list.append((os.path.basename(os.path.normpath(motif_residue)), transformed_motif))
+
+            # Generate residue-conformer PDBs for scoring here so I don't have to regenerate the transformed residues...
+            self.generate_residue_ligand_pdbs(conformer, motif_residue_list, generate_residue_ligand_pairs=True,
+                                              generate_single_pose=True, generate_reference_pose=False)
+
+            if actually_generate_matrix == True:
+                residue_residue_clash_set = set()
+                for outer_index, outer_motif_tuple in enumerate(motif_residue_list):
+                    for inner_index, inner_motif_tuple in enumerate(motif_residue_list[outer_index + 1:]):
+                        outer_motif_index = int(outer_motif_tuple[0].split('-')[0])
+                        inner_motif_index = int(inner_motif_tuple[0].split('-')[0])
+                        if minimum_contact_distance(outer_motif_tuple[1], inner_motif_tuple[1]) < clashing_cutoff:
+
+                            # If clashing, append tuples in both orders... look up times? Whatever!
+                            if outer_motif_index != inner_motif_index:
+                                residue_residue_clash_set.add((outer_motif_index, inner_motif_index))
+                                residue_residue_clash_set.add((inner_motif_index, outer_motif_index))
+
+                residue_residue_clash_dict[conformer_name] = list(residue_residue_clash_set)
+
+        if actually_generate_matrix == True:
+            yaml.dump(residue_residue_clash_dict, open(
+                os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Residue_Residue_Clash_COO.yml'), 'w'))
+
+    # DEPRECIATED
+    def transform_motif_residues_onto_fragments(self):
+        """
+        Exactly what is says!
+
+        :return:
+        """
+        # Precalculate transformation matrices for each fragment for each conformer
+        conformer_transformation_dict = {}
+
+        # Open fragment prodys and stick them in a dicitonary
+        fragment_prody_dict = {}
+
+        # First need to do translation and rotation of all motif residues relative to fragments in new conformations
+        # Select atom names used for matcher constraints...
+        for conformer in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Rosetta_Inputs'),
+                                   conformer_check=True):
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+            conformer_transformation_dict[conformer_name] = {}
+
+            for fragment in pdb_check(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')):
+                # Map fragment onto conformer
+                # Add fragment prody to fragment_prody_dict
+                fragment_name = os.path.basename(os.path.normpath(fragment)).split('.')[0]
+                fragment_prody_dict[fragment_name] = prody.parsePDB(fragment)
+
+                # Determine transformation for fragment onto conformer
+                align = Align_PDB(self.user_defined_dir)
+
+                # Select fragment atoms from conformer
+                conformer_prody = prody.parsePDB(conformer)
+                fragment_prody = prody.parsePDB(fragment)
+                fragment_prody_atoms_names = fragment_prody.getNames()
+                corresponding_target_atoms = conformer_prody.select(
+                    'name {}'.format(' '.join(fragment_prody_atoms_names)))
+
+                frag_atom_coords = fragment_prody.getCoords()
+                trgt_atom_coords = corresponding_target_atoms.getCoords()
+
+                # Align only on rigid atoms (if they are defined in Rigid_Fragment_Atoms dir)
+                frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs',
+                                               'Rigid_Fragment_Atoms')
+
+                if os.path.exists(frag_inputs_dir):
+                    frag_rigid_pdb_name = '{}-rigid.pdb'.format(fragment_name)
+
+                    if frag_rigid_pdb_name in os.listdir(frag_inputs_dir):
+                        frag_atom_rigid, trgt_atom_rigid = align.return_rigid_atoms(fragment_name, frag_atom_coords,
+                                                                                    trgt_atom_coords)
+
+                        transformation = prody.calcTransformation(frag_atom_rigid, trgt_atom_rigid)
+
+                    else:
+                        transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+
+                else:
+                    transformation = prody.calcTransformation(frag_atom_coords, trgt_atom_coords)
+
+                conformer_transformation_dict[conformer_name][fragment_name] = transformation
+
+                # Debugging: Outputs PDBs of fragment transformed onto corresponding atoms on conformer
+                # import io
+                # os.makedirs(os.path.join(self.user_defined_dir, 'Conformer_Tests'), exist_ok=True)
+                # transformed_fragment = prody.applyTransformation(transformation, prody.parsePDBStream(io.StringIO(fragment_pdb_string)))
+                # prody.writePDB(os.path.join(self.user_defined_dir, 'Conformer_Tests', '{}-{}.pdb'.format(con_name, frag_name)), transformed_fragment)
+
+        return conformer_transformation_dict
+
+    # DEPRECIATED
+    def generate_residue_ligand_clash_list(self, cutoff_distance=2):
+        """
+        Filters representative motif residues that are clashing with the ligand for each conformer in Inputs/Rosetta_Inputs
+        Outputs a yaml file for each conformer with a list of motif residue indicies that clash
+        Clashing is determined by a distance cutoff for the closest atom-atom distance between each residue and the ligand
+
+        :param motif_residue_dir: directory with representative motif residue PDBs
+        :param clashing_cutoff: distance cutoff for clashing residues in angstroms. Default set to 2.
+        :return:
+        """
+        # Generate and output a yaml file for each conformer and list which residues clash
+        # This way I can output all representative motif residues once and just ignore the ones that clash for each conformer
+        # YAML will be a dict with conformer pdbs as keys and list of residue indices as values
+
+        residue_ligand_clash_dict = {}
+
+        target_molecule = os.path.normpath(self.user_defined_dir)
+        for conformer in directory_check(self.residue_ligand_interactions_dir):
+            clashing_residue_indices = []
+            for motif_residue in pdb_check(conformer):
+                interaction_prody = prody.parsePDB(motif_residue)
+                residue_prody = interaction_prody.select('protein')
+                ligand_prody = interaction_prody.select('hetero')
+
+                if minimum_contact_distance(residue_prody, ligand_prody) <= cutoff_distance:
+                    residue_index = re.split('-|\.', os.path.basename(motif_residue))[1]
+                    clashing_residue_indices.append(residue_index)
+
+            residue_ligand_clash_dict[os.path.basename(conformer)] = clashing_residue_indices
+
+        yaml.dump(residue_ligand_clash_dict,
+                  open(os.path.join(target_molecule, 'Inputs', 'User_Inputs', 'Residue_Ligand_Clash_List.yml'), 'w'))
+
 
 class Generate_Binding_Sites():
     """
