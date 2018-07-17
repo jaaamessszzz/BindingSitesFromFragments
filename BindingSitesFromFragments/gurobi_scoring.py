@@ -62,23 +62,66 @@ class score_with_gurobi():
             self.user_defined_dir), index_col=0)
         df.to_sql('residue_index_mapping', con=connection, if_exists='replace')
 
-        # todo: After looking into it, I'm pretty sure fa_rep is already weighted and I'm now underweighting it...
         cursor.execute(
             """CREATE TABLE relevant_2b_scores AS
             SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
             residue_scores_2b.resNum2, score_types.score_type_name, residue_scores_2b.score_value from residue_scores_2b
             left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where 
+            (
             (score_types.score_type_name = 'fa_atr' or
+            score_types.score_type_name = 'fa_rep' or
+            score_types.score_type_name = 'fa_sol' or
             score_types.score_type_name = 'fa_elec' or
             score_types.score_type_name = 'hbond_sc' or
-            score_types.score_type_name = 'hbond_bb_sc') 
+            score_types.score_type_name = 'hbond_bb_sc')
+            and
+            residue_scores_2b.resNum1 = 1
+            )
             UNION 
             SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
-            residue_scores_2b.resNum2, score_types.score_type_name, (residue_scores_2b.score_value * 1.00) from residue_scores_2b
+            residue_scores_2b.resNum2, score_types.score_type_name, residue_scores_2b.score_value from residue_scores_2b
             left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where 
-            (score_types.score_type_name = 'fa_rep')
+            (
+            (score_types.score_type_name = 'fa_atr' or
+            score_types.score_type_name = 'fa_rep' or
+            score_types.score_type_name = 'fa_sol' or
+            score_types.score_type_name = 'fa_elec' or
+            score_types.score_type_name = 'hbond_sc')
+            and
+            residue_scores_2b.resNum1 != 1
+            )
             """
         )
+
+            # Old query...
+
+            # """CREATE TABLE relevant_2b_scores AS
+            # SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
+            # residue_scores_2b.resNum2, score_types.score_type_name, residue_scores_2b.score_value from residue_scores_2b
+            # left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where
+            # (score_types.score_type_name = 'fa_atr' or
+            # score_types.score_type_name = 'fa_elec' or
+            # score_types.score_type_name = 'hbond_sc' or
+            # score_types.score_type_name = 'hbond_bb_sc')
+            # UNION
+            # SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
+            # residue_scores_2b.resNum2, score_types.score_type_name, (residue_scores_2b.score_value * 1.00) from residue_scores_2b
+            # left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where
+            # (score_types.score_type_name = 'fa_rep')
+            # """
+
+        # Free up space
+        cursor.execute("DROP TABLE IF EXISTS batch_reports")
+        cursor.execute("DROP TABLE IF EXISTS features_reporters")
+        cursor.execute("DROP TABLE IF EXISTS residue_scores_lr_2b")
+        cursor.execute("DROP TABLE IF EXISTS residue_scores_2b")
+        cursor.execute("DROP TABLE IF EXISTS residue_scores_1b")
+        cursor.execute("DROP TABLE IF EXISTS residues")
+        cursor.execute("DROP TABLE IF EXISTS score_types")
+        cursor.execute("DROP TABLE IF EXISTS sampled_structures")
+        cursor.execute("DROP TABLE IF EXISTS structures")
+        cursor.execute("DROP TABLE IF EXISTS batches")
+        cursor.execute("DROP TABLE IF EXISTS protocols")
 
     def do_gurobi_things(self):
         # Generate gurobi input table/csv
