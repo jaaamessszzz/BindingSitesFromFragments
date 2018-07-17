@@ -33,7 +33,7 @@ Usage:
     bsff gurobi <user_defined_dir>
     bsff classic <user_defined_dir> <motif_size>
     bsff magic <user_defined_dir>
-    bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g]
+    bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g] [-j]
     bsff BW_gurobi_constraints <user_defined_dir> <conformer> <gurobi_solutions_csv>
     bsff derp <user_defined_dir> <conformer> <gurobi_solutions_csv>
 
@@ -107,6 +107,9 @@ Options:
 
     -g --greasy_sampling
         Increase the tolerance and sample number for greasy residues (ACFILMVWY)
+
+    -j --json
+        Generate a JSON file containing relevant constraint blocks in lieu of complete constraint files
         
     -m --secondary_matching
         Use secondary matching for constraint files
@@ -191,25 +194,35 @@ def main():
     if args['cluster']:
         cluster(working_directory, args)
 
+    if args['dump_single_poses']:
+        # Generate single poses
+        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+        motifs.single_pose_cluster_residue_dump()
+
+    # DEPRECIATED
     if args['generate_motifs']:
         # Generate motif residues for each ligand conformer
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.generate_motif_residues()
 
+    # DEPRECIATED
     if args['prepare_motifs']:
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         motifs.prepare_motifs_for_conformers()
 
+    # DEPRECIATED
     if args['bind_everything']:
 
         bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
         bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
+    # DEPRECIATED
     if args['generate_constraints']:
         bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
         bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
 
+    # DEPRECIATED
     if args['pull_constraints']:
 
         df_unsorted = pd.read_csv(os.path.join(args['<user_defined_dir>'],
@@ -234,11 +247,6 @@ def main():
                 cst_file_name = '{}.cst'.format(row['description'][:-5])
                 shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
 
-    if args['dump_single_poses']:
-        # Generate single poses
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.single_pose_cluster_residue_dump()
-        
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
@@ -246,6 +254,7 @@ def main():
         gurobi.consolidate_scores_better()
         # gurobi.do_gurobi_things()
 
+    # DEPRECIATED
     if args['classic']:
         # Search
         frag = Fragments(working_directory)
@@ -269,6 +278,7 @@ def main():
         bind.calculate_energies_and_rank(int(args['<motif_size>']))
         bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
+    # DEPRECIATED
     if args['magic']:
         from .gurobi_scoring import score_with_gurobi
 
@@ -311,7 +321,8 @@ def main():
                                                                             iteration=args['iteration'],
                                                                             angle_dihedral_tolerance=tolerance,
                                                                             angle_dihedral_sample_number=samples,
-                                                                            greasy_sampling=args['--greasy_sampling'])
+                                                                            greasy_sampling=args['--greasy_sampling'],
+                                                                            json_output=args['--json'])
 
 # todo: all of this (poorly implemented) logic should be in the alignment class...
 # todo: write a small function for adding rejected pdbs to the text file...
@@ -407,7 +418,7 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                             print('{}: {}'.format(pdbid, e))
                             with open(rejected_list_path, 'a+') as reject_list:
                                 reject_list.write('{}\n'.format(pdbid))
-                            print('REJECTED - the idealized target from LigandExpo icannot be parsed with prody')
+                            print('REJECTED - the idealized target from LigandExpo cannot be parsed with prody')
                             continue
 
                         # Extract HETATM and CONECT records for the target ligand
@@ -461,22 +472,22 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                                 print('REJECTED - failed atom mapping between target and reference fragment')
                                 continue
 
-                            # Determine translation vector and rotation matrix
-                            trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(current_fragment=current_fragment)
+                            print('\n{0} possible mapping(s) of fragment onto {1}:{2} found...\n'.format(len(align.fragment_target_map), pdbid, ligand))
 
-                            # Apply transformation to protein_ligand complex if rmsd if below cutoff
-                            rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
-                            print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
+                            for count, mapping in enumerate(align.fragment_target_map):
+                                # Determine translation vector and rotation matrix
+                                trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, current_fragment=current_fragment)
 
-                            # DEBUGGING
-                            sys.exit()
+                                # Apply transformation to protein_ligand complex if rmsd if below cutoff
+                                rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
+                                print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
 
-                            if rmsd < rmsd_cutoff:
-                                align.apply_transformation(transformation_matrix)
-                            else:
-                                with open(rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
-                                print('REJECTED - high RMSD upon alignment to reference fragment')
+                                if rmsd < rmsd_cutoff:
+                                    align.apply_transformation(transformation_matrix, mapping_count=count)
+                                else:
+                                    with open(rejected_list_path, 'a+') as reject_list:
+                                        reject_list.write('{}\n'.format(pdbid))
+                                    print('REJECTED - high RMSD upon alignment to reference fragment')
 
                     else:
                         print('{} has been processed!'.format(pdb))
@@ -492,7 +503,7 @@ def cluster(working_directory, args):
         # Set weights
         weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
         # Set distance cutoff
-        distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 5
+        distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 4.5
 
         cluster = Cluster(fragment, distance_cutoff, weights)
 
