@@ -146,6 +146,10 @@ class Align_PDB():
             # If the number of atoms are the same, good enough for me (at the moment)
             self.ideal_ligand_pdb.seek(0)
             ideal_ligand_prody = prody.parsePDBStream(self.ideal_ligand_pdb)
+            if ideal_ligand_prody is None:
+                print('Ideal ligand PDB could not be parsed by ProDy!')
+                return False
+
             if atom_count == ideal_ligand_prody.select('not hydrogen').numAtoms():
 
                 # todo: find a more elegant way of testing if prody can open these
@@ -200,7 +204,7 @@ class Align_PDB():
 
         # Map ideal ligand to pdb ligand, assert 1:1 mapping excluding hydrogens
         ligand_ideal = Chem.MolFromSmiles(self.target_ligand_dict['smiles'])
-        ligand_pdb = Chem.MolFromPDBBlock(self.target_string, removeHs=True)
+        ligand_pdb = Chem.MolFromPDBBlock(self.target_string, removeHs=False)
 
         if ligand_pdb is None:
             print('\nUnable to load ligand PDB as an RDKit mol object...\n')
@@ -226,7 +230,11 @@ class Align_PDB():
 
         # Map Fragment SMILES onto fragment PDB
         fragment_ideal = Chem.MolFromSmiles(fragment_smiles)
-        fragment_pdb = Chem.MolFromPDBBlock(self.fragment_string, removeHs=True)
+        fragment_pdb = Chem.MolFromPDBBlock(self.fragment_string, removeHs=False)
+
+        if any([fragment_pdb is None, fragment_ideal is None]):
+            print('There was an issue creating an RDKit mol object of the PDB fragment...')
+            return False
 
         fragment_mcs = rdFMCS.FindMCS([fragment_ideal, fragment_pdb], bondCompare=rdFMCS.BondCompare.CompareAny)
         fragment_substructure_mol = Chem.MolFromSmarts(fragment_mcs.smartsString)
@@ -418,7 +426,7 @@ class Align_PDB():
 
 class Fragment_Alignments(Align_PDB):
     """
-    This subclass class is responsible for aligning all fragment-containing small molecule structures to the corresponding 
+    This class is responsible for aligning all fragment-containing small molecule structures to the corresponding
     fragments.
     """
 
