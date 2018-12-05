@@ -23,19 +23,10 @@ Usage:
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
-    bsff generate_motifs <user_defined_dir> [options]
-    bsff prepare_motifs <user_defined_dir> [options]
-    bsff bind_everything <user_defined_dir> <motif_size> [-x <score_cutoff_option>]
-    bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
-    bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
-    bsff generate_fragments <ligand> [options]
     bsff dump_single_poses <user_defined_dir>
     bsff gurobi <user_defined_dir>
-    bsff classic <user_defined_dir> <motif_size>
-    bsff magic <user_defined_dir>
     bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g] [-j]
-    bsff BW_gurobi_constraints <user_defined_dir> <conformer> <gurobi_solutions_csv>
-    bsff derp <user_defined_dir> <conformer> <gurobi_solutions_csv>
+
 
 Arguments:
     new
@@ -98,10 +89,7 @@ Arguments:
 Options:
     -c --clusters <clusters>
         Set number of clusters
-        
-    -d --distance_cutoff <distance_cutoff>
-        Distance cutoff in angstroms for residues to consider in clustering
-        
+
     -f --ligand_input_format <format>
         Use a different input format for the ligand. [CID|name|smiles]
 
@@ -132,6 +120,19 @@ Options:
     -x --score_cutoff_option <score_cutoff_option>
         Score cutoff to use for generating constraint files
 """
+
+# --- Out-dated options --- #
+# bsff generate_motifs <user_defined_dir> [options]
+# bsff prepare_motifs <user_defined_dir> [options]
+# bsff bind_everything <user_defined_dir> <motif_size> [-x <score_cutoff_option>]
+# bsff generate_constraints <user_defined_dir> <score_cutoff> [-m]
+# bsff pull_constraints <user_defined_dir> <score_cutoff> [-n <number_to_pull>]
+# bsff generate_fragments <ligand> [options]
+# bsff classic < user_defined_dir > < motif_size >
+# bsff magic < user_defined_dir >
+# bsff BW_gurobi_constraints < user_defined_dir > < conformer > < gurobi_solutions_csv >
+# bsff derp < user_defined_dir > < conformer > < gurobi_solutions_csv >
+
 __author__ = 'James Lucas'
 
 import docopt
@@ -180,9 +181,9 @@ def main():
         with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_inputs.csv'), 'w') as fragment_inputs:
             fragment_inputs.write('Fragment, SMILES_fragment')
 
-    if args['generate_fragments']:
-        frag = Fragments(working_directory)
-        frag.generate_fragements_from_ligand(args['<ligand>'])
+    # if args['generate_fragments']:
+    #     frag = Fragments(working_directory)
+    #     frag.generate_fragements_from_ligand(args['<ligand>'])
 
     if args['search']:
         frag = Fragments(working_directory)
@@ -200,52 +201,52 @@ def main():
         motifs.single_pose_cluster_residue_dump()
 
     # DEPRECIATED
-    if args['generate_motifs']:
-        # Generate motif residues for each ligand conformer
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.generate_motif_residues()
+    # if args['generate_motifs']:
+    #     # Generate motif residues for each ligand conformer
+    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     motifs.generate_motif_residues()
 
     # DEPRECIATED
-    if args['prepare_motifs']:
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.prepare_motifs_for_conformers()
+    # if args['prepare_motifs']:
+    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     motifs.prepare_motifs_for_conformers()
 
     # DEPRECIATED
-    if args['bind_everything']:
-
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
-        bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
-
-    # DEPRECIATED
-    if args['generate_constraints']:
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
+    # if args['bind_everything']:
+    #
+    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
+    #     bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
     # DEPRECIATED
-    if args['pull_constraints']:
+    # if args['generate_constraints']:
+    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
 
-        df_unsorted = pd.read_csv(os.path.join(args['<user_defined_dir>'],
-                                               'Complete_Matcher_Constraints',
-                                               '{}_scores_df.csv'.format(os.path.basename(os.path.normpath(args['<user_defined_dir>'])))
-                                               )
-                                  )
-
-        df = df_unsorted.sort_values('total_score', ascending=True)
-        df.reset_index(inplace=True)
-
-        score_cutoff = -float(args['<score_cutoff>'])
-
-        source_dir = os.path.join(args['<user_defined_dir>'], 'Complete_Matcher_Constraints', 'Constraint_Files')
-        destination_dir = os.path.join(args['<user_defined_dir>'], 'Pulled_Constraints')
-        os.makedirs(destination_dir, exist_ok=False)
-
-        number_cutoff = int(args['<number_to_pull>']) if args['--number_to_pull'] else df.shape[0]
-
-        for index, row in df.iterrows():
-            if row['total_score'] < score_cutoff and index < number_cutoff:
-                cst_file_name = '{}.cst'.format(row['description'][:-5])
-                shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
+    # DEPRECIATED
+    # if args['pull_constraints']:
+    #
+    #     df_unsorted = pd.read_csv(os.path.join(args['<user_defined_dir>'],
+    #                                            'Complete_Matcher_Constraints',
+    #                                            '{}_scores_df.csv'.format(os.path.basename(os.path.normpath(args['<user_defined_dir>'])))
+    #                                            )
+    #                               )
+    #
+    #     df = df_unsorted.sort_values('total_score', ascending=True)
+    #     df.reset_index(inplace=True)
+    #
+    #     score_cutoff = -float(args['<score_cutoff>'])
+    #
+    #     source_dir = os.path.join(args['<user_defined_dir>'], 'Complete_Matcher_Constraints', 'Constraint_Files')
+    #     destination_dir = os.path.join(args['<user_defined_dir>'], 'Pulled_Constraints')
+    #     os.makedirs(destination_dir, exist_ok=False)
+    #
+    #     number_cutoff = int(args['<number_to_pull>']) if args['--number_to_pull'] else df.shape[0]
+    #
+    #     for index, row in df.iterrows():
+    #         if row['total_score'] < score_cutoff and index < number_cutoff:
+    #             cst_file_name = '{}.cst'.format(row['description'][:-5])
+    #             shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
 
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
@@ -255,57 +256,58 @@ def main():
         # gurobi.do_gurobi_things()
 
     # DEPRECIATED
-    if args['classic']:
-        # Search
-        frag = Fragments(working_directory)
-        frag.search_for_fragment_containing_ligands()
-
-        # Align
-        alignment_monstrosity(working_directory, args)
-
-        # Cluster
-        cluster(working_directory, args)
-
-        # Generate motifs
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.generate_motif_residues()
-
-        # Prepare motifs
-        motifs.prepare_motifs_for_conformers()
-
-        # Bind everything
-        bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        bind.calculate_energies_and_rank(int(args['<motif_size>']))
-        bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
+    # if args['classic']:
+    #     # Search
+    #     frag = Fragments(working_directory)
+    #     frag.search_for_fragment_containing_ligands()
+    #
+    #     # Align
+    #     alignment_monstrosity(working_directory, args)
+    #
+    #     # Cluster
+    #     cluster(working_directory, args)
+    #
+    #     # Generate motifs
+    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     motifs.generate_motif_residues()
+    #
+    #     # Prepare motifs
+    #     motifs.prepare_motifs_for_conformers()
+    #
+    #     # Bind everything
+    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     bind.calculate_energies_and_rank(int(args['<motif_size>']))
+    #     bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
 
     # DEPRECIATED
-    if args['magic']:
-        from .gurobi_scoring import score_with_gurobi
+    # if args['magic']:
+    #     from .gurobi_scoring import score_with_gurobi
+    #
+    #     # Search
+    #     frag = Fragments(working_directory)
+    #     frag.search_for_fragment_containing_ligands()
+    #
+    #     # Align
+    #     alignment_monstrosity(working_directory, args)
+    #
+    #     # Cluster
+    #     cluster(working_directory, args)
+    #
+    #     # Generate single poses
+    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     motifs.single_pose_cluster_residue_dump()
+    #
+    #     # Gurobi
+    #     gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
+    #     gurobi.generate_feature_reporter_db()
+    #     gurobi.consolidate_scores_better()
+    #     gurobi.do_gurobi_things()
 
-        # Search
-        frag = Fragments(working_directory)
-        frag.search_for_fragment_containing_ligands()
-
-        # Align
-        alignment_monstrosity(working_directory, args)
-
-        # Cluster
-        cluster(working_directory, args)
-
-        # Generate single poses
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.single_pose_cluster_residue_dump()
-
-        # Gurobi
-        gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        gurobi.generate_feature_reporter_db()
-        gurobi.consolidate_scores_better()
-        gurobi.do_gurobi_things()
-
-    if args['BW_gurobi_constraints']:
-        generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
-        generate_constraints.import_res_idx_map()
-        generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'], args['<conformer>'])
+    # DEPRECIATED
+    # if args['BW_gurobi_constraints']:
+    #     generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
+    #     generate_constraints.import_res_idx_map()
+    #     generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'], args['<conformer>'])
 
     if args['classic_gurobi_constraints']:
         # todo: add option for number of constraints to generate
@@ -316,7 +318,7 @@ def main():
         tolerance = int(args['--tolerances']) if args['--tolerances'] else 5
         samples = int(args['--samples']) if args['--samples'] else 1
         generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'],
-                                                                            constraints_to_generate=2000,
+                                                                            constraints_to_generate=5000,
                                                                             offset=0,
                                                                             iteration=args['iteration'],
                                                                             angle_dihedral_tolerance=tolerance,
@@ -475,6 +477,7 @@ def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
                             print('\n{0} possible mapping(s) of fragment onto {1}:{2} found...\n'.format(len(align.fragment_target_map), pdbid, ligand))
 
                             for count, mapping in enumerate(align.fragment_target_map):
+
                                 # Determine translation vector and rotation matrix
                                 trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, current_fragment=current_fragment)
 
@@ -502,10 +505,8 @@ def cluster(working_directory, args):
 
         # Set weights
         weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
-        # Set distance cutoff
-        distance_cutoff = args['--distance_cutoff'] if args['--distance_cutoff'] else 4.5
 
-        cluster = Cluster(fragment, distance_cutoff, weights)
+        cluster = Cluster(fragment, weights)
 
         if len(cluster.pdb_object_list) > 2:
             cluster.cluster_scipy()
