@@ -159,8 +159,8 @@ class Fragments():
 
             pubchem_results = pd.read_csv(os.path.join(search_dir, "{}.csv".format(current_fragment)))
 
-            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='left', on='cmpdinchikey')
-            ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
+            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='inner', on='cmpdinchikey')
+            # ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
 
             # todo: Add option to export PBD ligand matches
             ligands_in_pdb_df.to_csv(os.path.join(self.user_defined_dir, "Fragment_PDB_Matches", current_fragment, '{}_pdb.csv'.format(current_fragment)))
