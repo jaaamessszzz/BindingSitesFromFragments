@@ -13,10 +13,9 @@ class Cluster():
     This class is responsible for taking aligned fragment PDBs and identifying representative contacts. 
     """
 
-    def __init__(self, processed_PDBs_dir, distance_cutoff, weights):
+    def __init__(self, processed_PDBs_dir, weights):
         self.processed_PDBs_dir = processed_PDBs_dir
         self.weights = weights
-        self.distance_cutoff = distance_cutoff
         self.pdb_object_list = self._import_pdbs()
         self.clusters = None
         self.df = None
@@ -42,7 +41,7 @@ class Cluster():
 
             # Iterate over residues in contacts and generate representative vector with weights applied
             for chain in prody_protein_hv:
-                processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.distance_cutoff, self.weights) for residue in chain]
+                processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.weights) for residue in chain]
 
         processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.vector is not None]
 
@@ -168,7 +167,14 @@ class Cluster():
         print('Cluster size mean:', cluster_size_mean)
         print('Cluster size SD:', cluster_size_SD)
 
-        selected_cluster_rows = sorted_df[sorted_df.cluster_members > (cluster_size_mean + cluster_size_SD)]
+        # Extended Mean - 0.5 SD
+        selected_cluster_rows = sorted_df[sorted_df.cluster_members > (cluster_size_mean - 0.5 * cluster_size_SD)]
+
+        # Mean + 1 SD
+        # selected_cluster_rows = sorted_df[sorted_df.cluster_members > (cluster_size_mean + cluster_size_SD)]
+
+        # Mean
+        # selected_cluster_rows = sorted_df[sorted_df.cluster_members > cluster_size_mean]
 
         print('Selected clusters:')
         pprint.pprint(selected_cluster_rows)
@@ -188,13 +194,13 @@ class fragment_PDB():
     :param pdbid:
     :param vector:
     """
-    def __init__(self, prody_residue, pdb_info, prody_ligand, distance_cutoff, weights):
+    def __init__(self, prody_residue, pdb_info, prody_ligand, weights):
         self.prody_residue = prody_residue
         self.prody_ligand = prody_ligand
         self.pdb_info = pdb_info
+        self.distance_cutoff = 4 #Angstroms
         self.residue_center = prody.calcCenter(prody_residue)
         self.ligand_center = prody.calcCenter(prody_ligand)
-        self.distance_cutoff = distance_cutoff
         self.weights = weights
         self.vector = self.process_residue_into_vector()
         # For cluster evaluation, assigned in process_residue_into_vector()
@@ -243,8 +249,15 @@ class fragment_PDB():
         """
 
         min_contact_distance, row_index_low, column_index_low = minimum_contact_distance(self.prody_residue, self.prody_ligand, return_indices=True)
+        polar_residues = ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'ARG', 'SER', 'THR', 'TYR']
 
-        if min_contact_distance > self.distance_cutoff:
+        distance_cutoff_polar = 3.5
+        distance_cutoff_greasy = 4
+
+        if all([self.prody_residue.getResnames()[0] in polar_residues, min_contact_distance > distance_cutoff_polar]):
+            return None
+
+        elif min_contact_distance > distance_cutoff_greasy:
             return None
 
         else:
@@ -269,7 +282,7 @@ class fragment_PDB():
             self.contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
 
             # Side chain has hydrogen bond donor/acceptor (DEHKNQRSTY)
-            h_bond_donor_acceptor = 1 if self.residue_contact_atom.getResnames()[0] in ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'ARG', 'SER', 'THR', 'TYR'] else 0
+            h_bond_donor_acceptor = 1 if self.residue_contact_atom.getResnames()[0] in polar_residues else 0
 
             # Residue characteristics
             # todo: UPDATE so that only one of the below can hold value of 1 at any given time
