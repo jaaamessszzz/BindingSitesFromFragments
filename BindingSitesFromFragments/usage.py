@@ -26,7 +26,8 @@ Usage:
     bsff dump_single_poses <user_defined_dir>
     bsff gurobi <user_defined_dir>
     bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g] [-j]
-
+    bsff score <user_defined_dir>
+    bsff assemble <user_defined_dir>
 
 Arguments:
     new
@@ -136,22 +137,18 @@ Options:
 __author__ = 'James Lucas'
 
 import docopt
-import os
-import sys
-import pprint
-import re
 import yaml
-import shutil
 import pandas as pd
-import appdirs
 import xmltodict
 import urllib
+import json
 
 from .fragments import Fragments
-from .alignments import Fragment_Alignments
+from .alignments import Align_PDB_Factory
 from .clustering import Cluster
-from .motifs import Generate_Motif_Residues, Generate_Binding_Sites, Generate_Constraints
+from .motifs import Generate_Motif_Residues, Generate_Constraints, Generate_Fuzzball_using_PyRosetta
 from .utils import *
+
 
 def main():
     # Import config
@@ -185,68 +182,45 @@ def main():
     #     frag = Fragments(working_directory)
     #     frag.generate_fragements_from_ligand(args['<ligand>'])
 
+    # todo: merge seach and align functions
+    """
+    20181222 - The old search implementation generated an intersection of the LigandExpo PDB ligand list and PubChem
+    search results for each fragment, followed by an impossibly slow serial download of all relevant PDBs using PyPDB. 
+    This was impossibly slow since it uses the PDB downloadFile.do tool. 
+    
+    Search will now dump all search results into a JSON that can be referenced by the alignment step. 
+    Align will now either use the wwPDB FTP server to download structures or use locally available structures.
+    """
+
     if args['search']:
         frag = Fragments(working_directory)
         frag.search_for_fragment_containing_ligands()
 
     if args['align']:
-        alignment_monstrosity(working_directory, args)
+        use_cluster_pdb_database = False
+        perform_alignments = Align_PDB_Factory(working_directory)
+        perform_alignments.alignment_monstrosity(use_cluster_pdb_database=use_cluster_pdb_database)
 
     if args['cluster']:
-        cluster(working_directory, args)
+        for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
+            # processed_PDBs_dir, distance_cutoff, weights
+
+            # Set weights
+            weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
+
+            cluster = Cluster(fragment, weights)
+
+            if len(cluster.pdb_object_list) > 2:
+                cluster.cluster_scipy()
+
+            if cluster.clusters is not None:
+                cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
+                cluster.automated_cluster_selection()
 
     if args['dump_single_poses']:
         # Generate single poses
         motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.single_pose_cluster_residue_dump()
-
-    # DEPRECIATED
-    # if args['generate_motifs']:
-    #     # Generate motif residues for each ligand conformer
-    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     motifs.generate_motif_residues()
-
-    # DEPRECIATED
-    # if args['prepare_motifs']:
-    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     motifs.prepare_motifs_for_conformers()
-
-    # DEPRECIATED
-    # if args['bind_everything']:
-    #
-    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     bind.calculate_energies_and_rank(motif_size=int(args['<motif_size>']))
-    #     bind.generate_binding_site_constraints(score_cutoff=-float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
-
-    # DEPRECIATED
-    # if args['generate_constraints']:
-    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     bind.generate_binding_site_constraints(score_cutoff=-float(args['<score_cutoff>']), secondary_matching=args['--secondary_matching'])
-
-    # DEPRECIATED
-    # if args['pull_constraints']:
-    #
-    #     df_unsorted = pd.read_csv(os.path.join(args['<user_defined_dir>'],
-    #                                            'Complete_Matcher_Constraints',
-    #                                            '{}_scores_df.csv'.format(os.path.basename(os.path.normpath(args['<user_defined_dir>'])))
-    #                                            )
-    #                               )
-    #
-    #     df = df_unsorted.sort_values('total_score', ascending=True)
-    #     df.reset_index(inplace=True)
-    #
-    #     score_cutoff = -float(args['<score_cutoff>'])
-    #
-    #     source_dir = os.path.join(args['<user_defined_dir>'], 'Complete_Matcher_Constraints', 'Constraint_Files')
-    #     destination_dir = os.path.join(args['<user_defined_dir>'], 'Pulled_Constraints')
-    #     os.makedirs(destination_dir, exist_ok=False)
-    #
-    #     number_cutoff = int(args['<number_to_pull>']) if args['--number_to_pull'] else df.shape[0]
-    #
-    #     for index, row in df.iterrows():
-    #         if row['total_score'] < score_cutoff and index < number_cutoff:
-    #             cst_file_name = '{}.cst'.format(row['description'][:-5])
-    #             shutil.copy(os.path.join(source_dir, cst_file_name), os.path.join(destination_dir, cst_file_name))
+        motifs.generate_all_the_fuzzballs()
 
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
@@ -254,60 +228,6 @@ def main():
         gurobi.generate_feature_reporter_db()
         gurobi.consolidate_scores_better()
         # gurobi.do_gurobi_things()
-
-    # DEPRECIATED
-    # if args['classic']:
-    #     # Search
-    #     frag = Fragments(working_directory)
-    #     frag.search_for_fragment_containing_ligands()
-    #
-    #     # Align
-    #     alignment_monstrosity(working_directory, args)
-    #
-    #     # Cluster
-    #     cluster(working_directory, args)
-    #
-    #     # Generate motifs
-    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     motifs.generate_motif_residues()
-    #
-    #     # Prepare motifs
-    #     motifs.prepare_motifs_for_conformers()
-    #
-    #     # Bind everything
-    #     bind = Generate_Binding_Sites(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     bind.calculate_energies_and_rank(int(args['<motif_size>']))
-    #     bind.generate_binding_site_constraints(score_cutoff=float(args['--score_cutoff_option']) if args['--score_cutoff_option'] else -10)
-
-    # DEPRECIATED
-    # if args['magic']:
-    #     from .gurobi_scoring import score_with_gurobi
-    #
-    #     # Search
-    #     frag = Fragments(working_directory)
-    #     frag.search_for_fragment_containing_ligands()
-    #
-    #     # Align
-    #     alignment_monstrosity(working_directory, args)
-    #
-    #     # Cluster
-    #     cluster(working_directory, args)
-    #
-    #     # Generate single poses
-    #     motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     motifs.single_pose_cluster_residue_dump()
-    #
-    #     # Gurobi
-    #     gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-    #     gurobi.generate_feature_reporter_db()
-    #     gurobi.consolidate_scores_better()
-    #     gurobi.do_gurobi_things()
-
-    # DEPRECIATED
-    # if args['BW_gurobi_constraints']:
-    #     generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
-    #     generate_constraints.import_res_idx_map()
-    #     generate_constraints.BW_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv>'], args['<conformer>'])
 
     if args['classic_gurobi_constraints']:
         # todo: add option for number of constraints to generate
@@ -326,191 +246,12 @@ def main():
                                                                             greasy_sampling=args['--greasy_sampling'],
                                                                             json_output=args['--json'])
 
-# todo: all of this (poorly implemented) logic should be in the alignment class...
-# todo: write a small function for adding rejected pdbs to the text file...
-# todo: really, fix this. This is disgusting.
-def alignment_monstrosity(working_directory, args, rmsd_cutoff=0.5):
-    """
-    Consequences of not thinking ahead...
+    if args['score']:
+        derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'])
+        derp.score_motif_conformer_interactions()
 
-    :param args: 
-    :param rmsd_cutoff: fragment alignment RMSD cutoff, anything higher gets rejected 
-    :return: 
-    """
-    # For each fragment, align all fragment-containing ligands to fragment
-    # Generate PDBs with aligned coordinate systems
-
-    # Import list of ligands to exclude from processing
-    # Three-letter ligand codes (UPPER CASE)
-    # e.g. IMD, so much randomly bound IMD everywhere
-    exclude_ligand_list = []
-    exclude_txt = os.path.join(working_directory, 'Inputs', 'User_Inputs', 'Exclude_Ligands.txt')
-    if os.path.exists(exclude_txt):
-        with open(exclude_txt, 'r') as exlude_ligands:
-            exclude_ligand_list = [lig.strip() for lig in exlude_ligands]
-
-    # Open Fragment_inputs.csv
-    fragment_inputs_path = os.path.join(working_directory, 'Inputs', 'Fragment_Inputs')
-    fragment_df = pd.read_csv(os.path.join(fragment_inputs_path, 'Fragment_inputs.csv'))
-
-    # Sanitized SMILES strings
-    sanitized_smiles_dict = {'Fragment_{}'.format(row['Fragment']): re.sub(r'[^\[\]]+(?=\])', lambda x: '{0}'.format(x.group().split(';')[0]), row['SMILES_fragment']) for index, row in fragment_df.iterrows()}
-
-    # Fragment_1, Fragment_2, ...
-    for fragment in directory_check(os.path.join(working_directory, 'Fragment_PDB_Matches')):
-        current_fragment = os.path.basename(fragment)
-
-        # Create directory for processed PDBs
-        processed_PDBs_path = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
-        os.makedirs(processed_PDBs_path, exist_ok=True)
-
-        # Three-letter codes for fragment-containing compounds
-        for fcc in directory_check(fragment):
-            ligand = os.path.basename(os.path.normpath(fcc))
-
-            # Check if ligand is in exclusion list
-            if ligand not in exclude_ligand_list:
-
-                # Each PDB containing a fragment-containing compound
-                for pdb in pdb_check(fcc):
-                    pdbid = os.path.basename(os.path.normpath(pdb))
-
-                    # Check if PDB has already been processed
-                    rejected_list_path = os.path.join(processed_PDBs_path, 'Rejected_PDBs.txt')
-                    rejected_list = []
-                    if os.path.exists(rejected_list_path):
-                        with open(rejected_list_path, 'r') as rejected_PDBs:
-                            rejected_list = [pdb.strip() for pdb in rejected_PDBs]
-
-                    processed_dir = os.path.join(working_directory, 'Transformed_Aligned_PDBs', current_fragment)
-
-                    if not processed_check(processed_dir, pdbid, rejected_list):
-                        print("\n\nProcessing {}".format(pdbid))
-                        # Set things up! Get ligands from Ligand Expo
-                        # This is to avoid downloading ligands when all PDBs have already been processed
-
-                        align = Fragment_Alignments(working_directory, ligand, processed_PDBs_path)
-
-                        # lazy try/except block to catch errors in retrieving pdbs... namely empty pdbs...
-                        # I can't believe how unorganized everything is, damn.
-
-                        # Fetches ideal pdbs and list of PDB records where ligand is bound (for now)
-                        try:
-                            align.fetch_records()
-
-                        except Exception as e:
-                            print('{}: {}'.format(pdbid, e))
-                            with open(rejected_list_path, 'a+') as reject_list:
-                                reject_list.write('{}\n'.format(pdbid))
-                            print('REJECTED - something went wrong with fetching the idealized target from LigandExpo')
-                            continue
-
-                        # Fetched PDBs can still be empty somehow...
-                        if align.ideal_ligand_pdb is None:
-                            with open(rejected_list_path, 'a+') as reject_list:
-                                reject_list.write('{}\n'.format(pdbid))
-                            print('REJECTED - the idealized target from LigandExpo is messed up or missing')
-                            continue
-
-                        try:
-                            ideal_ligand_prody = prody.parsePDBStream(align.ideal_ligand_pdb)
-                            align.ideal_ligand_pdb.seek(0)
-
-                        except Exception as e:
-                            print('{}: {}'.format(pdbid, e))
-                            with open(rejected_list_path, 'a+') as reject_list:
-                                reject_list.write('{}\n'.format(pdbid))
-                            print('REJECTED - the idealized target from LigandExpo cannot be parsed with prody')
-                            continue
-
-                        # Extract HETATM and CONECT records for the target ligand
-                        # ligand_records, ligand_chain = align.extract_atoms_and_connectivities(ligand, pdb)
-
-                        reject = align.extract_ligand_records(pdb)
-                        # reject = align.fetch_specific_ligand_record(pdb)
-
-                        # Reject if no ligands with all atoms represented can be found for the given pdb/ligand combo
-                        if reject:
-                            with open(rejected_list_path, 'a+') as reject_list:
-                                reject_list.write('{}\n'.format(pdbid))
-                            print('REJECTED - no target ligands were fully represented in the PDB')
-                            continue
-
-                        # Get Ligand information from the PDB (SMILES strings specifically)
-                        try:
-                            search_request = urllib.request.Request('https://www.rcsb.org/pdb/rest/ligandInfo?structureId={0}'.format(pdbid))
-                            search_result = urllib.request.urlopen(search_request, data=None, timeout=300).read()
-                            pdb_ligand_dict = xmltodict.parse(search_result)
-
-                            target_ligand_dict = {}
-                            ligand_dicts = pdb_ligand_dict['structureId']['ligandInfo']['ligand']
-
-                            # PDB REST only returns a list if there's more than one ligand... or maybe it's XMLtoDict...
-                            ligand_dict_list = ligand_dicts if type(ligand_dicts) is list else [ligand_dicts]
-
-                            for dict in ligand_dict_list:
-                                if dict['@chemicalID'] == ligand:
-                                    target_ligand_dict = dict
-                                    break
-
-                            if target_ligand_dict == {}:
-                                raise Exception('Failed to retrieve ligand information from the PDB for {0}: {1}!'.format(pdbid,fcc))
-
-                            align.target_ligand_dict = target_ligand_dict
-
-                        except Exception as e:
-                            print('Issue retrieving ligand information from the PDB...')
-                            print('{}: {}'.format(pdbid, e))
-
-                        # Continue if PDB has not been processed, rejected, or excluded by the user
-                        else:
-                            # Mapping of fragment atoms to target ligand atoms
-                            align.fragment_string = open(os.path.join(fragment_inputs_path, '{}.pdb'.format(current_fragment))).read()
-                            mapping_successful = align.fragment_target_mapping(sanitized_smiles_dict[current_fragment])
-
-                            if not mapping_successful:
-                                with open(rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
-                                print('REJECTED - failed atom mapping between target and reference fragment')
-                                continue
-
-                            print('\n{0} possible mapping(s) of fragment onto {1}:{2} found...\n'.format(len(align.fragment_target_map), pdbid, ligand))
-
-                            for count, mapping in enumerate(align.fragment_target_map):
-
-                                # Determine translation vector and rotation matrix
-                                trgt_atom_coords, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, current_fragment=current_fragment)
-
-                                # Apply transformation to protein_ligand complex if rmsd if below cutoff
-                                rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
-                                print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
-
-                                if rmsd < rmsd_cutoff:
-                                    align.apply_transformation(transformation_matrix, mapping_count=count)
-                                else:
-                                    with open(rejected_list_path, 'a+') as reject_list:
-                                        reject_list.write('{}\n'.format(pdbid))
-                                    print('REJECTED - high RMSD upon alignment to reference fragment')
-
-                    else:
-                        print('{} has been processed!'.format(pdb))
-
-def cluster(working_directory, args):
-    """
-    Consequences of not thinking ahead...
-    :return: 
-    """
-    for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-        # processed_PDBs_dir, distance_cutoff, weights
-
-        # Set weights
-        weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
-
-        cluster = Cluster(fragment, weights)
-
-        if len(cluster.pdb_object_list) > 2:
-            cluster.cluster_scipy()
-
-        if cluster.clusters is not None:
-            cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
-            cluster.automated_cluster_selection()
+    if args['assemble']:
+        derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'])
+        for conformer in pdb_check(os.path.join(args['<user_defined_dir>'], 'Inputs', 'Rosetta_Inputs'), base_only=True, conformer_check=True):
+            conformer_name = conformer.split('.')[0]
+            derp.assemble_defined_fuzzball(conformer_name)
