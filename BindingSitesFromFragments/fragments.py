@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 
-import numpy as np
 import pandas as pd
 import pypdb
+import json
 import pubchempy
 import xmltodict
 import pprint
 import urllib
 import os
 
-class Fragments():
+from .utils import *
+
+# --- Silence ProDy --- #
+prody.confProDy(verbosity='none')
+
+class Fragments(object):
     """
     This is a class for all things fragment related for generating hypothetical
     binding pockets.
@@ -57,18 +62,19 @@ class Fragments():
         self.user_defined_dir = user_defined_dir
         self.resources_dir = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files')
 
+    # NEVER IMPLEMENTED!
     def generate_fragements_from_ligand(self, ligand=None, ligand_input_format='name', method='smiles'):
         """
         Generate fragments from a given ligand.
-        
+
+        > Look into RDKit.Chem.Lipinski.NumHAcceptors(x) + RDKit.Chem.Lipinski.NumHDonors(x) if I want to systematically
+        generate fragments.
+
         I don't really have a nice way of doing this yet... for the time being I'm going to define fragments by hand
         using the Fragment-Based Drug Discovery Rule of Threes:
         * Molecular weight <300Da
         * Up to three hydrogen bond donors/acceptors
         * LogP <= 3 (hydrophobicity)
-        
-        todo:
-        * File input (probably yaml) to define fragments and breaks in target ligand
         
         :param ligand: input ligand format defined be <ligand_input_format>
         :param ligand_input_format: format of <ligand>, small molecule name by default. [name|CID|smiles]
@@ -137,61 +143,51 @@ class Fragments():
         # Falling back to manually doing the searches on Pubchem and downloading the detailed search results
         # Name each search using the SMILES string to simplify things
 
-        # todo: os.path.join...? Why didn't I do this the first time around?
-        fragment_inputs = pd.read_csv("{}/Inputs/Fragment_Inputs/Fragment_inputs.csv".format(self.user_defined_dir))
-        search_dir = "{}/Inputs/Fragment_Inputs".format(self.user_defined_dir)
+        search_dir = os.path.join(f"{self.user_defined_dir}", "Inputs", "Fragment_Inputs")
+        fragment_inputs = pd.read_csv(os.path.join(search_dir, "Fragment_inputs.csv"))
+
+        pdb_dict = {}
 
         for index, search_query in fragment_inputs.iterrows():
-            # Using Pubchem API (if I could get it to work...)
-            # pubchem_search_results = pubchempy.get_compounds("N1C=CN=C1",
-            #                                                  searchtype='substructure',
-            #                                                  listkey_count=0,
-            #                                                  as_dataframe=True)
-
+            # todo: Figure out how the PubChem PUG REST API works...
             current_fragment = "Fragment_{}".format(search_query["Fragment"])
+            pdb_dict[current_fragment] = {}
 
             # Make directory for each fragment
-            os.makedirs(os.path.join(self.user_defined_dir,
-                                     "Fragment_PDB_Matches",
-                                     current_fragment),
-                        exist_ok=True)
-            # print(os.path.join("Fragment_{}".format(str(search_query["Fragment"])), fragment_smiles))
-
+            os.makedirs(os.path.join(self.user_defined_dir, "Fragment_PDB_Matches", current_fragment), exist_ok=True)
             pubchem_results = pd.read_csv(os.path.join(search_dir, "{}.csv".format(current_fragment)))
-
             ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='inner', on='cmpdinchikey')
-            # ligands_in_pdb_df = ligands_in_pdb_df.dropna(how='any')
 
-            # todo: Add option to export PBD ligand matches
             ligands_in_pdb_df.to_csv(os.path.join(self.user_defined_dir, "Fragment_PDB_Matches", current_fragment, '{}_pdb.csv'.format(current_fragment)))
 
             # Generate set of PDBIDs for fragment-containing ligands
             pdbid_set = set(ligands_in_pdb_df['PDBID'])
-            print(pdbid_set)
-            for ligand_pdbid in pdbid_set:
-                # Make directory to dump PDB files for each fragment-containing ligand
-                fragment_ligand_path = os.path.join(self.user_defined_dir,
-                                                    "Fragment_PDB_Matches",
-                                                    current_fragment,
-                                                    ligand_pdbid)
 
-                # Download PDBs
-                self.download_PDBs(ligand_pdbid, fragment_ligand_path)
+            # REPORT
+            print(f'\n{current_fragment}\n')
+            print(f'Ligands found to contain {current_fragment}:\n{pdbid_set}')
 
-    def download_PDBs(self, ligand_pdbid, fragment_ligand_path):
+            # Download PDBs
+            pdb_dict[current_fragment]['Ligands'] = list(pdbid_set)
+            pdb_dict[current_fragment]['PDBs'] = self.search_PDBs(pdbid_set)
+
+        with open(os.path.join(self.user_defined_dir, 'PDB_search_results.json'), 'w') as jsonfile:
+            json.dump(pdb_dict, jsonfile)
+
+    def search_PDBs(self, ligand_pdbid_list):
         """
         Download all PDBs with the provided fragment-containing ligand
         :param ligand_pdbid: three character PDBID for the fragment-containing ligand
         :return: 
         """
 
-        REST_search_xml = """
+        REST_search_xml = f"""
         <orgPdbCompositeQuery version="1.0">
         <queryRefinement>
         <queryRefinementLevel>0</queryRefinementLevel>
         <orgPdbQuery>
         <queryType>org.pdb.query.simple.ChemCompIdQuery</queryType>
-        <chemCompId>{}</chemCompId>
+        <chemCompId>{" ".join(ligand_pdbid_list)}</chemCompId>
         <polymericType>Free</polymericType>
         </orgPdbQuery>
         </queryRefinement>
@@ -200,7 +196,7 @@ class Fragments():
         <conjunctionType>and</conjunctionType>
         <orgPdbQuery>
         <queryType>org.pdb.query.simple.HomologueReductionQuery</queryType>
-        <identityCutoff>70</identityCutoff>
+        <identityCutoff>90</identityCutoff>
         </orgPdbQuery>
         </queryRefinement>
         <queryRefinement>
@@ -215,43 +211,13 @@ class Fragments():
         </orgPdbQuery>
         </queryRefinement>
         </orgPdbCompositeQuery>
-        """.format(ligand_pdbid)
+        """
 
         search_xml = xmltodict.unparse(xmltodict.parse(REST_search_xml), pretty=False)
         search_request = urllib.request.Request('http://www.rcsb.org/pdb/rest/search', data=search_xml.encode())
-        search_result = urllib.request.urlopen(search_request, data=None, timeout=300).read()
+        search_result = urllib.request.urlopen(search_request, data=None, timeout=10).read()
 
-        result_pdbs = search_result.split()
+        # REPORT
+        print('\nPDB records containing relevant ligands:', [pdb.decode('utf-8') for pdb in search_result.split()])
 
-        if len(result_pdbs) > 0:
-            os.makedirs(fragment_ligand_path, exist_ok=True)
-            print(result_pdbs)
-            print("Created:", fragment_ligand_path)
-
-            # Download PDB files
-            for pdb in result_pdbs:
-                pdb_name = pdb.decode("utf-8")
-
-                if not os.path.exists(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name))):
-                    try:
-                        print("Downloading {}...".format(pdb_name))
-                        pdb_string = pypdb.get_pdb_file(pdb_name, filetype='pdb')
-                        if self.verify_pdb_quality(pdb_name):
-                            current_download = open(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), 'w')
-                            current_download.write(pdb_string)
-                            current_download.close()
-                    except Exception as e:
-                        print(e)
-                        continue
-                else:
-                    print(os.path.join(fragment_ligand_path, "{}.pdb".format(pdb_name)), "exists! Moving on...")
-
-    def verify_pdb_quality(self, pdb_file):
-        """
-        Verify the quality of a PDB structure before downloading
-        Structures are not usable if:
-        * There are multiple occupancies for the target ligand
-        * There are multiple binding sites in one chain for the target ligand (suggests non-specific binding)
-        :return: 
-        """
-        return True
+        return [pdb.decode('utf-8').lower() for pdb in search_result.split()]
