@@ -5,10 +5,14 @@ import sys
 import numpy as np
 import prody
 import pandas as pd
-import pprint
+from pprint import pprint
+
 from .utils import *
 
-class Cluster():
+# --- Silence ProDy --- #
+prody.confProDy(verbosity='none')
+
+class Cluster(object):
     """
     This class is responsible for taking aligned fragment PDBs and identifying representative contacts. 
     """
@@ -40,8 +44,7 @@ class Cluster():
             prody_ligand = prody.parsePDB(pdb).select('hetatm and resname {}'.format(pdb_info.split('_')[1]))
 
             # Iterate over residues in contacts and generate representative vector with weights applied
-            for chain in prody_protein_hv:
-                processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.weights) for residue in chain]
+            processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.weights) for residue in prody_protein_hv.iterResidues()]
 
         processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.vector is not None]
 
@@ -78,19 +81,20 @@ class Cluster():
         self.distance_cutoff = 2**0.5
         self.clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
 
-    def generate_output_directories(self, base_dir, fragment_path):
-        residue_cluster_pairs = [(cluster, residue)for cluster, residue in zip(self.clusters, self.pdb_object_list)]
+    def generate_output_directories(self, base_dir, fragment_path, consolidate_clusters=True):
+
+        residue_cluster_pairs = [(cluster, residue) for cluster, residue in zip(self.clusters, self.pdb_object_list)]
         fragment = os.path.basename(os.path.normpath(fragment_path))
+        fragment_number = fragment.split('_')[1]
 
         dict_list = []
 
         for cluster in set(self.clusters):
+            # todo: add option to output clusters as PDB alongside ag.npz files
+
             # Generate list of fragment_PDB objects containing all relevant information on residue-ligand contacts in a cluster
             residue_list = [pair for pair in residue_cluster_pairs if pair[0] == cluster]
-            fragment_cluster_path = os.path.join(base_dir,
-                                     'Cluster_Results',
-                                     fragment
-                                     )
+            fragment_cluster_path = os.path.join(base_dir, 'Cluster_Results', fragment)
 
             os.makedirs(fragment_cluster_path, exist_ok=True)
 
@@ -98,19 +102,47 @@ class Cluster():
             dict_list.append(self.generate_report_row(residue_list, cluster))
 
             # Output residue PDBs for each cluster
-            count=0
-            for index, residue in enumerate(residue_list):
-                if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
-                                                                 'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
-                                                                 'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
-                                                                 'THR', 'VAL', 'TRP', 'TYR']:
-                    prody.writePDB(os.path.join(fragment_cluster_path,
-                                                'Cluster_{0}-{1}_{2}-{3}'.format(cluster,
-                                                                                 residue[1].prody_residue.getResnames()[0],
-                                                                                 str(index),
-                                                                                 residue[1].pdb_info)
-                                                ),
-                                   residue[1].prody_residue)
+            if consolidate_clusters:
+
+                def tag_residue(cluster, res, index=2):
+                    """"
+                    Tag residue CA with source PDB string
+                    :param cluster: cluster index
+                    :param res: Fragment_PDB() container instance
+                    """
+                    residue_atomgroup = res.prody_residue.copy()
+                    residue_source_string = f'{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{res.pdb_info.split(".")[0]}'
+
+                    residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
+                    residue_atomgroup.setData('cluster', [int(cluster) for atom in residue_atomgroup])
+                    residue_atomgroup.setData('fragment_id', [int(fragment_number) for atom in residue_atomgroup])
+
+                    residue_atomgroup.setResnums([index] * len(residue_atomgroup))
+                    residue_atomgroup.setChids(['A'] * len(residue_atomgroup))
+
+                    return residue_atomgroup
+
+                # Start cluster_ensemble using first element... it seems you can't add residues to an empty AtomGroup
+                cluster_ensemble = tag_residue(*residue_list[0])
+
+                for index, (cluster_number, residue_container) in enumerate(residue_list[1:], start=3):
+                    cluster_ensemble = cluster_ensemble + tag_residue(cluster_number, residue_container, index=index)
+
+                prody.saveAtoms(cluster_ensemble, filename=os.path.join(fragment_cluster_path, f'Cluster_{cluster}'))
+
+            else:
+                for index, residue in enumerate(residue_list):
+                    if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
+                                                                     'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
+                                                                     'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
+                                                                     'THR', 'VAL', 'TRP', 'TYR']:
+                        prody.writePDB(os.path.join(fragment_cluster_path,
+                                                    'Cluster_{0}-{1}_{2}-{3}'.format(cluster,
+                                                                                     residue[1].prody_residue.getResnames()[0],
+                                                                                     str(index),
+                                                                                     residue[1].pdb_info)
+                                                    ),
+                                       residue[1].prody_residue)
 
         # Export .csv
         self.df = pd.DataFrame(dict_list)
@@ -177,14 +209,14 @@ class Cluster():
         # selected_cluster_rows = sorted_df[sorted_df.cluster_members > cluster_size_mean]
 
         print('Selected clusters:')
-        pprint.pprint(selected_cluster_rows)
+        pprint(selected_cluster_rows)
 
         with open(motif_yaml_path, 'a') as motif_yaml:
             motif_yaml.write('{}:\n'.format(current_fragment))
             for index, row in selected_cluster_rows.iterrows():
                 motif_yaml.write('- {}\n'.format(int(row['cluster_index'])))
 
-class fragment_PDB():
+class fragment_PDB(object):
     """
     Class for holding all information related to a processed fragment PDB
     
@@ -203,10 +235,9 @@ class fragment_PDB():
         self.ligand_center = prody.calcCenter(prody_ligand)
         self.weights = weights
         self.vector = self.process_residue_into_vector()
+
         # For cluster evaluation, assigned in process_residue_into_vector()
         # Not a great practice, but meh...
-        # self.residue_contact_atom
-        # self.ligand_contact_atom
         # self.min_contact_distance
         # self.contact_unit_vector
 
@@ -261,51 +292,47 @@ class fragment_PDB():
             return None
 
         else:
-            # todo: use copies of prody selections so I don't do this base index BS
-            residue_base_index = self.prody_residue.getIndices()[0]
-            ligand_base_index = self.prody_ligand.getIndices()[0]
-
-            self.residue_contact_atom = self.prody_residue.select('index {}'.format(residue_base_index + row_index_low))
-            self.ligand_contact_atom = self.prody_ligand.select('index {}'.format(ligand_base_index + column_index_low))
+            residue_contact_atom = self.prody_residue.copy().select('index {}'.format(row_index_low))
+            ligand_contact_atom = self.prody_ligand.copy().select('index {}'.format(column_index_low))
 
             # Save min contact residue and ligand atom indicies for evaluating cluster quality later
             self.min_contact_distance = min_contact_distance
 
             # Residue Contact Type
-            residue_contact_type = 0 if self.residue_contact_atom.getNames()[0] in ['C', 'CA', 'N', 'O'] else 1
+            residue_contact_type = 0 if residue_contact_atom.getNames()[0] in ['C', 'CA', 'N', 'O'] else 1
 
             # Ligand Contact Type
-            ligand_contact_type = 1 if self.ligand_contact_atom.getNames()[0][0] in ['C'] else 0
+            ligand_contact_type = 1 if ligand_contact_atom.getNames()[0][0] in ['C'] else 0
 
             # Vector from fragment centroid to closest residue atom
-            contact_vector = (self.residue_contact_atom.getCoords() - self.ligand_center)[0]
+            contact_vector = (residue_contact_atom.getCoords() - self.ligand_center)[0]
             self.contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
 
             # Side chain has hydrogen bond donor/acceptor (DEHKNQRSTY)
-            h_bond_donor_acceptor = 1 if self.residue_contact_atom.getResnames()[0] in polar_residues else 0
+            h_bond_donor_acceptor = 1 if residue_contact_atom.getResnames()[0] in polar_residues else 0
 
             # Residue characteristics
             # todo: UPDATE so that only one of the below can hold value of 1 at any given time
             # {0 | 1} - Hydrophobic, aliphatic(AILV)
-            greasy_ali = 1 if self.residue_contact_atom.getResnames()[0] in ['ALA', 'ILE', 'LEU', 'VAL'] else 0
+            greasy_ali = 1 if residue_contact_atom.getResnames()[0] in ['ALA', 'ILE', 'LEU', 'VAL'] else 0
             # {0 | 1} - Hydrophobic, aromatic(FWY)
-            greasy_aro = 1 if self.residue_contact_atom.getResnames()[0] in ['PHE', 'TYR', 'TRP'] else 0
+            greasy_aro = 1 if residue_contact_atom.getResnames()[0] in ['PHE', 'TYR', 'TRP'] else 0
             # {0 | 1} - Polar(NCQMST)
-            polar = 1 if self.residue_contact_atom.getResnames()[0] in ['ASN', 'CYS', 'GLN', 'MET', 'SER', 'THR'] else 0
+            polar = 1 if residue_contact_atom.getResnames()[0] in ['ASN', 'CYS', 'GLN', 'MET', 'SER', 'THR'] else 0
             # {0 | 1} - Charged, Acidic(DE)
-            charged_acid = 1 if self.residue_contact_atom.getResnames()[0] in ['ASP', 'GLU'] else 0
+            charged_acid = 1 if residue_contact_atom.getResnames()[0] in ['ASP', 'GLU'] else 0
             # {0 | 1} - Charged, Basic(HKR)
-            charged_basic = 1 if self.residue_contact_atom.getResnames()[0] in ['HIS', 'LYS', 'ARG'] else 0
+            charged_basic = 1 if residue_contact_atom.getResnames()[0] in ['HIS', 'LYS', 'ARG'] else 0
             # {0 | 1} - Glycine
-            glycine = 1 if self.residue_contact_atom.getResnames()[0] in ['GLY'] else 0
+            glycine = 1 if residue_contact_atom.getResnames()[0] in ['GLY'] else 0
             # {0 | 1} - Proline
-            proline = 1 if self.residue_contact_atom.getResnames()[0] in ['PRO'] else 0
+            proline = 1 if residue_contact_atom.getResnames()[0] in ['PRO'] else 0
             # {0 | 1} - Backbone carbonyl
-            bb_carbonyl = 1 if self.residue_contact_atom.getNames()[0] in ['O'] else 0
+            bb_carbonyl = 1 if residue_contact_atom.getNames()[0] in ['O'] else 0
             # {0 | 1} - Backbone amino
-            bb_amino = 1 if self.residue_contact_atom.getNames()[0] in ['N'] else 0
+            bb_amino = 1 if residue_contact_atom.getNames()[0] in ['N'] else 0
             # {0 | 1} - Backbone C / CA
-            bb_c_ca = 1 if self.residue_contact_atom.getNames()[0] in ['C', 'CA'] else 0
+            bb_c_ca = 1 if residue_contact_atom.getNames()[0] in ['C', 'CA'] else 0
 
             residue_vector = [
                 self.contact_unit_vector[0] * self.weights[0],
