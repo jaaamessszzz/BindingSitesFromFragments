@@ -4,9 +4,12 @@
 Utility functions!
 """
 import os
+import io
 import prody
 import numpy as np
 import re
+
+from rdkit import Chem
 
 def generate_new_project():
     """
@@ -26,10 +29,10 @@ def directory_check(dir, base_only=False):
                 yield path
 
 
-def pdb_check(dir, base_only=False, conformer_check=False):
+def pdb_check(dir, base_only=False, conformer_check=False, extension='.pdb'):
     for file in os.listdir(dir):
         path = os.path.join(dir, file)
-        if path.endswith('.pdb'):
+        if path.endswith(extension):
             if not conformer_check or (conformer_check and 'conformers' not in re.split('\.|_|-', file)):
                 if base_only:
                     yield file
@@ -79,3 +82,39 @@ def minimum_contact_distance(a_H, b_H, return_indices=False, strip_H=True):
         return ligand_residue_distance_matrix.item(row_index_low, column_index_low), row_index_low, column_index_low
     else:
         return ligand_residue_distance_matrix.item(row_index_low, column_index_low)
+
+
+def find_conformer_and_constraint_resnums(pdb_name):
+    """
+    Generates name of ideal binding motif from match PDB name
+    :param pdb_name:
+    :return:
+    """
+    pdb_split = re.split('_|-|\.', pdb_name)
+
+    ligand_name_index = 5
+    conformer_id_index = 6
+
+    if len(pdb_split[4]) == 4:
+        ligand_name_index += 1
+        conformer_id_index += 1
+
+    ligand_name = pdb_split[ligand_name_index]
+    conformer_id = pdb_split[conformer_id_index]
+    conformer_name = '{}_{}'.format(ligand_name, conformer_id)
+
+    constraint_resnum_block = re.split('-|\.', pdb_name)[1][:-2]
+    constraint_resnums = [int(a) for a in constraint_resnum_block.split('_') if a != ''][1:]
+
+    return conformer_name, constraint_resnums
+
+
+def RDKit_Mol_from_ProDy(prody_instance, removeHs=True):
+    """
+    Creates an RDKit Mol object from a ProDy AtomGroup instance
+    :return:
+    """
+    residue_io = io.StringIO()
+    prody.writePDBStream(residue_io, prody_instance)
+
+    return Chem.MolFromPDBBlock(residue_io.getvalue(), removeHs=removeHs)
