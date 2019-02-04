@@ -136,7 +136,7 @@ class Fragments(object):
 
         InChIKey_to_PDB = pd.read_csv(os.path.join(self.resources_dir, "Components-inchikey.tsv"),
                                       delimiter="\t",
-                                      names=["cmpdinchikey", "PDBID", "Name"])
+                                      names=["inchikey", "PDBID", "Name"])
 
         # Perform fragment search through PubChem
         # I wanted to do this through the pubchempy API, but I can't get it to work for some reason
@@ -156,7 +156,7 @@ class Fragments(object):
             # Make directory for each fragment
             os.makedirs(os.path.join(self.user_defined_dir, "Fragment_PDB_Matches", current_fragment), exist_ok=True)
             pubchem_results = pd.read_csv(os.path.join(search_dir, "{}.csv".format(current_fragment)))
-            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='inner', on='cmpdinchikey')
+            ligands_in_pdb_df = pubchem_results.merge(InChIKey_to_PDB, how='inner', on='inchikey')
 
             ligands_in_pdb_df.to_csv(os.path.join(self.user_defined_dir, "Fragment_PDB_Matches", current_fragment, '{}_pdb.csv'.format(current_fragment)))
 

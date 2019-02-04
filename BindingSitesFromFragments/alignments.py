@@ -46,7 +46,7 @@ class Align_PDB_Factory(object):
 
         # --- Other variables --- #
         self.sanitized_smiles_dict = {f"Fragment_{row['Fragment']}": re.sub(r'[^\[\]]+(?=\])', lambda x: f"{x.group().split(';')[0]}",
-                                                                            row['SMILES_fragment']) for index, row in self.fragment_df.iterrows()}
+                                                                            row['SMILES_fragment']).upper() for index, row in self.fragment_df.iterrows()}
 
     def alignment_monstrosity(self, rmsd_cutoff=0.5, use_cluster_pdb_database=False):
         """
@@ -130,7 +130,6 @@ class Align_PDB_Factory(object):
                     relevant_ligands_prody_dict = align.extract_ligand_records(pdb_path, ligand_container_dict_for_current_pdb)
 
                     # Reject if no ligands with all atoms represented can be found for the given PDB
-                    # todo: only reject ligands where fragment atoms are missing...
                     if len(relevant_ligands_prody_dict) < 1:
                         with open(self.rejected_list_path, 'a+') as reject_list:
                             reject_list.write('{}\n'.format(pdbid))
@@ -148,7 +147,11 @@ class Align_PDB_Factory(object):
 
                             # Mapping of fragment atoms to target ligand atoms
                             target_ligand_ideal_smiles = ligand_container_dict_for_current_pdb[ligand_resname].smiles
-                            
+
+                            # todo: catch ligands with missing SMILES strings earlier...
+                            if target_ligand_ideal_smiles is None:
+                                continue
+
                             target_ligand_pdb_string = io.StringIO()
                             target_ligand_prody = relevant_ligands_prody_dict[(ligand_resname, ligand_chain, ligand_resnum)].select('not hydrogen')
                             prody.writePDBStream(target_ligand_pdb_string, target_ligand_prody)
@@ -164,6 +167,7 @@ class Align_PDB_Factory(object):
                             print(f'\n{len(fragment_target_map)} possible mapping(s) of fragment onto {pdbid}:{ligand} found...\n')
 
                             # Iterate over possible mappings of fragment onto current ligand
+                            rmsd_success = False
                             for count, mapping in enumerate(fragment_target_map):
 
                                 # Determine translation vector and rotation matrix
@@ -179,11 +183,14 @@ class Align_PDB_Factory(object):
                                     transformed_pdb = align.apply_transformation(pdb_path, ligand_resnum, target_fragment_atom_serials, transformation_matrix)
                                     transformed_pdb_name = f'{pdbid}_{ligand_resname}_{ligand_chain}_{ligand_resnum}-{count}.pdb'
                                     prody.writePDB(os.path.join(processed_dir, transformed_pdb_name), transformed_pdb)
+                                    rmsd_success = True
 
                                 else:
-                                    with open(self.rejected_list_path, 'a+') as reject_list:
-                                        reject_list.write('{}\n'.format(pdbid))
                                     print('REJECTED - high RMSD upon alignment to reference fragment')
+
+                            if rmsd_success is False:
+                                with open(self.rejected_list_path, 'a+') as reject_list:
+                                    reject_list.write('{}\n'.format(pdbid))
 
                 else:
                     print('{} has been processed!'.format(pdbid))
@@ -199,7 +206,7 @@ class Align_PDB_Factory(object):
         exclude_txt = os.path.join(self.user_defined_dir, 'Inputs', 'User_Inputs', 'Exclude_Ligands.txt')
         if os.path.exists(exclude_txt):
             with open(exclude_txt, 'r') as exlude_ligands:
-                return [lig.strip() for lig in exlude_ligands]
+                return set([lig.strip() for lig in exlude_ligands])
         else:
             return None
 
@@ -279,7 +286,7 @@ class Align_PDB_Factory(object):
         pdb_header = prody.parsePDB(pdb_path, header=True, model=0)
         pdb_ligand_set = set([lig.resname for lig in pdb_header['chemicals']])
 
-        return list(pdb_ligand_set & set(pdb_ligand_json[current_fragment]['Ligands']))
+        return list((pdb_ligand_set - self.ligands_to_exclude) & set(pdb_ligand_json[current_fragment]['Ligands']))
 
 
 class Align_PDB(object):

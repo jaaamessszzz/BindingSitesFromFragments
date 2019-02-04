@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 
-import sqlite3
-import subprocess
 import os
 import sys
-import pandas as pd
-from gurobipy import *
 import pprint
+import sqlite3
 import itertools
+import subprocess
+
+import pandas as pd
+from .utils import *
+from .motifs import Generate_Motif_Residues
+from gurobipy import *
+
+import pyrosetta
+from pyrosetta import rosetta
 
 class score_with_gurobi():
     """
@@ -18,9 +24,6 @@ class score_with_gurobi():
         self.ligand_code = user_defined_dir[:3]
         self.resources_dir = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files')
         self.user_config = config_dict
-
-    def complete_everything(self):
-        pass
 
     def generate_feature_reporter_db(self):
         """
@@ -37,7 +40,7 @@ class score_with_gurobi():
                                                  '-parser:script_vars',
                                                  'target={}'.format(self.user_defined_dir),
                                                  '-l',
-                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/single_pose_list.txt'.format(self.user_defined_dir),
+                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/fuzzball_list.txt'.format(self.user_defined_dir),
                                                  '-extra_res_fa',
                                                  './{}/Inputs/Rosetta_Inputs/Scoring_params/{}.params'.format(self.user_defined_dir, self.ligand_code)
                                                  ])
@@ -58,8 +61,7 @@ class score_with_gurobi():
         cursor = connection.cursor()
 
         # Generate new table with residue-index mappings from .csv
-        df = pd.read_csv('./{}/Motifs/Residue_Ligand_Interactions/Single_Poses/residue_index_mapping.csv'.format(
-            self.user_defined_dir), index_col=0)
+        df = pd.read_csv(os.path.join(f'{self.user_defined_dir}', 'motif_residue_attributes.csv'), index_col=0)
         df.to_sql('residue_index_mapping', con=connection, if_exists='replace')
 
         cursor.execute(
@@ -122,115 +124,3 @@ class score_with_gurobi():
         cursor.execute("DROP TABLE IF EXISTS structures")
         cursor.execute("DROP TABLE IF EXISTS batches")
         cursor.execute("DROP TABLE IF EXISTS protocols")
-
-    def do_gurobi_things(self):
-        # Generate gurobi input table/csv
-        connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
-        cursor = connection.cursor()
-
-        residue_table = pd.read_sql_query("SELECT * from residues", connection)
-        score_table = pd.read_sql_query(
-            """
-            SELECT struct_id, resNum1, resNum2, 
-            CASE
-            WHEN sum(score_value) >= 0 THEN 1
-            ELSE sum(score_value)
-            END 
-            as score_total from relevant_2b_scores group by struct_id, resNum1, resNum2;
-            """, connection)
-
-        for struct_id, table in residue_table.groupby(['struct_id']):
-
-            #######################
-            # Solve for solutions #
-            #######################
-
-            # Set up model
-            residue_interactions = Model("residue_interactions")
-            MIP_var_dict = {}
-
-            # Add ligand
-            MIP_var_dict[float(1.0)] = residue_interactions.addVar(vtype=GRB.BINARY, name=str(1))
-
-            # Only add residues to Model if ligand-residue interaction energy is less than X
-            ligand_residue_scores = score_table.groupby(['struct_id', 'resNum1']).get_group((struct_id, 1))
-            for index, row in ligand_residue_scores.iterrows():
-                if row['score_total'] <= -0.75:
-                    MIP_var_dict[row['resNum2']] = residue_interactions.addVar(vtype=GRB.BINARY, name=str(row['resNum2']))
-
-            # List of residue indcies used in Model
-            MIP_residx_list = list(MIP_var_dict.keys())
-
-            # Set up dict with pairwise scores
-            score_dict = {}
-            relevant_scores = score_table.groupby(['struct_id']).get_group(struct_id)
-            for index, row in relevant_scores.iterrows():
-                if all([row['resNum1'] in MIP_residx_list, row['resNum2'] in MIP_residx_list]):
-                    score_dict[(row['resNum1'], row['resNum2'])] = row['score_total']
-
-            # Set objective function
-            two_body_interactions = [MIP_var_dict[key[0]] * MIP_var_dict[key[1]] * value for key, value in score_dict.items()]
-            residue_interactions.setObjective(quicksum(two_body_interactions), GRB.MINIMIZE)
-
-            ###################
-            # Add constraints #
-            ###################
-
-            # Always include ligand (residue 1)
-            residue_interactions.addConstr(MIP_var_dict[float(1)] == 1)
-
-            # Number of residues in a binding motif (includes ligand)
-            motif_count = 5
-            residue_interactions.addConstr(quicksum(var for var in MIP_var_dict.values()) == motif_count)
-
-            # todo: update this to use score_dict
-            # Residues cannot be a solution if two-body interaction energy is above X
-            current_struct_scores = score_table.groupby(['struct_id']).get_group(struct_id)
-            for index, row in current_struct_scores.iterrows():
-                if row['score_total'] >= 0 and all([row['resNum1'] in MIP_residx_list, row['resNum2'] in MIP_residx_list]):
-                    residue_interactions.addConstr(MIP_var_dict[int(row['resNum1'])] + MIP_var_dict[int(row['resNum2'])] <= 1)
-
-            # Set Parameters
-            residue_interactions.Params.PoolSolutions = 10000
-            residue_interactions.Params.PoolGap = 0.2
-            residue_interactions.Params.PoolSearchMode = 2
-
-            # residue_interactions.Params.MIPFocus = 3
-            # residue_interactions.Params.Presolve = 2
-            # residue_interactions.Params.Heuristics = 0.1
-
-            # Optimize
-            residue_interactions.optimize()
-
-            ######################
-            # Retrieve solutions #
-            ######################
-
-            # Get residue-index mapping for current conformer
-            index_mapping = pd.read_sql_query("SELECT * from residue_index_mapping WHERE struct_id = {}".format(struct_id), connection, index_col='residue_index')
-
-            # Set variables
-            results_list = []
-            compound_id = residue_table.loc[residue_table["resNum"] == 1]['name3'][0]
-            residues_in_motif = motif_count - 1
-
-            for i in range(residue_interactions.SolCount):
-                residue_interactions.setParam(GRB.Param.SolutionNumber, i)
-
-                res_index_tuple = [int(float(value.VarName)) for index, value in enumerate(residue_interactions.getVars()) if int(value.Xn) == 1]
-
-                source_pdb_list = [index_mapping.loc[idx, 'source_pdb'] for idx in res_index_tuple if idx != 1]
-                print('Residue Indicies: {}'.format(res_index_tuple))
-                # print('Non-Ideal Obj: {}'.format(residue_interactions.PoolObjVal))
-
-                # Janky method to get values for non-ideal solutions since I can't get Model.PoolObjVal to work...
-                solution_residue_pairs = [a for a in itertools.combinations(res_index_tuple, 2)]
-                non_ideal_solution = sum(value for key, value in score_dict.items() if key in solution_residue_pairs)
-                print('Non-Ideal Obj: {}'.format(non_ideal_solution))
-
-                results_list.append({'Residue_indicies': res_index_tuple,
-                                     'Obj_score': non_ideal_solution,
-                                     'Conformer': '{}_{:0>4}'.format(compound_id, struct_id)})
-
-            df = pd.DataFrame(results_list)
-            df.to_csv('Gurobi_results-{0}-{1}_residue-conformer_{2}.csv'.format(compound_id, residues_in_motif, struct_id))

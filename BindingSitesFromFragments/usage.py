@@ -23,7 +23,6 @@ Usage:
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
-    bsff dump_single_poses <user_defined_dir>
     bsff gurobi <user_defined_dir>
     bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g] [-j]
     bsff score <user_defined_dir>
@@ -146,7 +145,7 @@ import json
 from .fragments import Fragments
 from .alignments import Align_PDB_Factory
 from .clustering import Cluster
-from .motifs import Generate_Motif_Residues, Generate_Constraints, Generate_Fuzzball_using_PyRosetta
+from .motifs import Generate_Constraints, Generate_Fuzzball_using_PyRosetta
 from .utils import *
 
 
@@ -203,7 +202,12 @@ def main():
 
     if args['cluster']:
         for fragment in directory_check(os.path.join(args['<user_defined_dir>'], 'Transformed_Aligned_PDBs')):
-            # processed_PDBs_dir, distance_cutoff, weights
+
+            fragment_name =os.path.basename(os.path.normpath(fragment))
+            if os.path.exists(os.path.join(args['<user_defined_dir>'], 'Cluster_Results', fragment_name)):
+                continue
+
+            print(f'Processing {fragment_name}...')
 
             # Set weights
             weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
@@ -216,11 +220,6 @@ def main():
             if cluster.clusters is not None:
                 cluster.generate_output_directories(args['<user_defined_dir>'], fragment)
                 cluster.automated_cluster_selection()
-
-    if args['dump_single_poses']:
-        # Generate single poses
-        motifs = Generate_Motif_Residues(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        motifs.generate_all_the_fuzzballs()
 
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
@@ -252,6 +251,9 @@ def main():
 
     if args['assemble']:
         derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'])
-        for conformer in pdb_check(os.path.join(args['<user_defined_dir>'], 'Inputs', 'Rosetta_Inputs'), base_only=True, conformer_check=True):
-            conformer_name = conformer.split('.')[0]
-            derp.assemble_defined_fuzzball(conformer_name)
+
+        with open(os.path.join(derp.fuzzball_dir, 'fuzzball_list.txt'), 'w') as fuzzy_fuzz:
+            for conformer in pdb_check(derp.rosetta_inputs, base_only=True, conformer_check=True):
+                conformer_name = conformer.split('.')[0]
+                fuzzball_path = derp.assemble_fuzzball(conformer_name)
+                fuzzy_fuzz.write(f'{fuzzball_path}\n')

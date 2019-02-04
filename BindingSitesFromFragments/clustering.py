@@ -111,7 +111,7 @@ class Cluster(object):
                     :param res: Fragment_PDB() container instance
                     """
                     residue_atomgroup = res.prody_residue.copy()
-                    residue_source_string = f'{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{res.pdb_info.split(".")[0]}'
+                    residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{res.pdb_info.split(".")[0]}'
 
                     residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
                     residue_atomgroup.setData('cluster', [int(cluster) for atom in residue_atomgroup])

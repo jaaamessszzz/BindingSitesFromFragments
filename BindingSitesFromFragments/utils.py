@@ -45,7 +45,7 @@ def processed_check(processed_dir, pdb, rejected_list):
 
     in_reject_list = any([pdb == reject for reject in rejected_list])
     # already_processed = os.path.exists(os.path.join(processed_dir, '{}_processed.pdb'.format(pdbid)))
-    already_processed = any([pdbid == file[:4] for file in os.listdir(processed_dir)])
+    already_processed = any([pdbid == file[:4].upper() for file in os.listdir(processed_dir)])
 
     return any([in_reject_list, already_processed])
 
