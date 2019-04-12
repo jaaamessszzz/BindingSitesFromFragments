@@ -15,6 +15,7 @@ Commands listed in protocol order:
     assemble        Build a fuzzball using the best scoring side chain interactions with the defined ligand
     gurobi_setup    Solve for composite binding sites
     constraints     Generate RosettaMatch constraints for binding site solutions
+    crystallize     Find full binding site definitions from a nucleated match
 
 Options:
     -h --help
@@ -36,7 +37,7 @@ def main():
 
     # Interpret command line args
     argv = sys.argv[1:]
-    registered_commands = ['new', 'search', 'align', 'cluster', 'assemble', 'gurobi_setup', 'constraints', 'mcsolve']
+    registered_commands = ['new', 'search', 'align', 'cluster', 'assemble', 'gurobi_setup', 'constraints', 'mcsolve', 'crystallize']
 
     if len(argv) == 0 or argv[0] not in registered_commands:
         args = docopt(__doc__)
@@ -74,4 +75,8 @@ def main():
     if argv[0] == 'constraints':
         from .bsff_constraints import constraints
         constraints(docopt(constraints.__doc__, argv=argv))
+
+    if argv[0] == 'crystallize':
+        from .bsff_assemble import crystallize
+        crystallize(docopt(crystallize.__doc__, argv=argv))
 
