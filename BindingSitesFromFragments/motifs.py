@@ -4,7 +4,7 @@ import io
 import re
 import os
 import copy
-import json
+import pickle
 import shutil
 import collections
 from pprint import pprint
@@ -1150,7 +1150,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
     def minimum_fuzzball_definition_from_iteration(self, current_conformer_fuzzball, iteration):
         """
         Generate minimum fuzzball definition from a previous fuzzball iteration. I can just copy residues over directly
-        sincethe  motif residues have already been properly transformed.
+        since the  motif residues have already been properly transformed.
         :return:
         """
         iteration_hv = iteration.getHierView()
@@ -1168,6 +1168,20 @@ class Generate_Fuzzball_using_PyRosetta(object):
             current_conformer_fuzzball += residue.copy()
 
         return current_conformer_fuzzball
+
+    def map_atoms_onto_existing_ligand_conmplex(self, existing_complex_path):
+        """
+        Map ligand atom names from a Rosetta params file onto the ligand atoms in an existing protein-ligand complex.
+        This is required since the method uses the standardized param file atoms names to keep track of unique
+        protein-ligand contacts.
+        """
+
+        # Get all instances of ligand in protein
+        # Use RDKit to map idealized ligand onto existing ligand atoms
+        # Iterate through mapping and assign atom names
+        # Extract ligand and return for fuzzball aseembly
+
+        pass
 
     def assemble_fuzzball(self, conformer, add_user_defined_motifs=True, fuzzball_limit=2000, hbond_limit=250,
                           iteration=None, iteration_name=None, iteration_index=0, fuzzball_index=0):
@@ -1217,7 +1231,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         my_options = [f"-extra_res_fa {os.path.join(self.rosetta_inputs, f'{conformer}.params')}",
                       "-mute core.conformation core.chemical",
-                      '-ex1 -ex2 -extrachi_cutoff 0']
+                      '-ex1 -ex2 -ex3 -ex4 -extrachi_cutoff 0',
+                      '-packing:ex1:level 7 -packing:ex2:level 7 -packing:ex3:level 7 -packing:ex4:level 7']
         pyrosetta.init(options=' '.join(my_options))
 
         # Import minimum fuzzball prody (ligand + user-defined residues) as pose
@@ -1230,8 +1245,19 @@ class Generate_Fuzzball_using_PyRosetta(object):
         residues_in_minimum_fuzzball = current_conformer_fuzzball.numResidues()
         resnum_count = residues_in_minimum_fuzzball
 
-        sfxn = rosetta.core.scoring.get_score_function()
-        sfxn(minimum_fuzzball_pose)
+        # sfxn = rosetta.core.scoring.get_score_function()
+        # sfxn(minimum_fuzzball_pose)
+
+        # Custom score function using select 2b energies, consider hbond_bb_sc now that binding site is nucleated
+        bsff_sfxn = rosetta.core.scoring.ScoreFunction()
+        bsff_sfxn.set_weight(rosetta.core.scoring.fa_atr, 1)
+        bsff_sfxn.set_weight(rosetta.core.scoring.fa_rep, 0.55)
+        bsff_sfxn.set_weight(rosetta.core.scoring.fa_sol, 1)
+        bsff_sfxn.set_weight(rosetta.core.scoring.fa_elec, 1)
+        bsff_sfxn.set_weight(rosetta.core.scoring.hbond_sc, 1)
+        bsff_sfxn(minimum_fuzzball_pose)
+
+        sfxn_weights = bsff_sfxn.weights()
 
         # Import match_pdb if it exists and align onto fuzzball
         if match_pdb:
@@ -1243,11 +1269,15 @@ class Generate_Fuzzball_using_PyRosetta(object):
             # Get ligand from match, always last residue
             match_pose_size = match_pose.size()
             match_ligand = match_pose.residue(match_pose_size)
+            conformer_name, motif_resnums = find_conformer_and_constraint_resnums(os.path.basename(os.path.normpath(match_pdb)))
+
+            # Keep track of match positions and compatible residue identites
+            match_residue_map = {position: dict() for position in range(1, match_pose.size())}  # Assumes one ligand appended to end of sequence
 
             # Get ligand from fuzzball, always first residue
             fuzzball_ligand = minimum_fuzzball_pose.residue(1)
 
-            # Calculate rotation/translation by hand using first three residues of ligand
+            # Calculate rotation/translation by hand using first three atoms of ligand
             mobile_match = rosetta.numeric.xyzTransform_double_t(match_ligand.xyz(1), match_ligand.xyz(2), match_ligand.xyz(3))
             mobile_match_inverse = mobile_match.inverse()
             target_fuzzball = rosetta.numeric.xyzTransform_double_t(fuzzball_ligand.xyz(1), fuzzball_ligand.xyz(2), fuzzball_ligand.xyz(3))
@@ -1271,6 +1301,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
         # Add all other motif residues to fuzzball #
         ############################################
 
+        # todo: break this function up...
         def add_motif_residues_to_current_fuzzball(current_conformer_fuzzball, motif_residue_list_untransformed, resnum_count, iteration=False, limit=0):
             """
             Add motif residues to the current fuzzball. This function checks for redundant residues and potential clashes
@@ -1345,7 +1376,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                 minimum_fuzzball_plus_current_motif.append_pose_by_jump(motif_pose, residues_in_minimum_fuzzball)
 
                 # Score
-                sfxn(minimum_fuzzball_plus_current_motif)
+                bsff_sfxn(minimum_fuzzball_plus_current_motif)
                 e_edge = minimum_fuzzball_plus_current_motif.energies().energy_graph()
                 interaction_energies = list()
 
@@ -1354,27 +1385,28 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
                     if get_energy_edge is not None:
                         current_edge = get_energy_edge.fill_energy_map()
-
-                        interaction_energy = sum([current_edge[rosetta.core.scoring.fa_rep] * 0.55,
-                                                  current_edge[rosetta.core.scoring.fa_atr],
-                                                  current_edge[rosetta.core.scoring.hbond_sc],
-                                                  current_edge[rosetta.core.scoring.fa_sol],
-                                                  current_edge[rosetta.core.scoring.fa_elec]
-                                                  ]
-                                                 )
-
+                        interaction_energy = current_edge.dot(sfxn_weights)
                         interaction_energies.append(interaction_energy)
 
-                # Only accept non-clashing residues
-                if any([e > 0.25 for e in interaction_energies]):
-                    print(f'{motif_residue_transformed.getData("contact_source")[0]} clashes with a defined residue!\n')
-                    continue
+                # Only accept residues that do not clash with the minimum motif
+                # Only score motif-ligand edge during iteration since inverse rotamers may be compatible
+                if iteration:
+                    if interaction_energies[0] > 0.25:
+                        print(f'{motif_residue_transformed.getData("contact_source")[0]} clashes with the ligand!')
+                        continue
+                else:
+                    if any([e > 0.25 for e in interaction_energies]):
+                        print(f'{motif_residue_transformed.getData("contact_source")[0]} clashes with a defined residue!\n')
+                        continue
 
                 # --- Inverse Rotamer Match Compatability Filter --- #
 
                 if iteration:
 
                     accept_current_motif = False
+
+                    # Keep track of match positions that can accommodate current residue identity
+                    compatible_match_positions = set()
 
                     # Get coords from matcher contact atoms
                     pyrosetta_motif_residue = motif_pose.residue(1).clone()
@@ -1386,6 +1418,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
                     motif_constraint_indicies = [pyrosetta_motif_residue.atom_index(atom) for atom in current_motif_constraint_atoms]
                     assert len(motif_constraint_indicies) == 3
+
+                    # --- Try fuzzball conformer --- #
 
                     # Get all nearby backbone positions in match
                     match_neighbors = [position for position in range(1, match_pose_size) if pyrosetta_motif_residue.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 6]
@@ -1403,66 +1437,69 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
                         if mainchain_rmsd < 2:
                             accept_current_motif = True
-                            break
 
-                    # If current motif isn't accepted, try all conformers
-                    if not accept_current_motif:
+                    # --- Try other conformers --- #
 
-                        # Get conformers for current residue type
-                        current_rotamer_library = residue_conformers[pyrosetta_motif_residue.name3()]
-                        sample_motif_rotamers = pyrosetta_motif_residue.clone()
+                    # Get conformers for current residue type
+                    current_rotamer_library = residue_conformers[pyrosetta_motif_residue.name3()]
+                    sample_motif_rotamers = pyrosetta_motif_residue.clone()
 
-                        # This doesn't seem to work...
-                        # sample_motif_rotamers.select_orient_atoms(*motif_constraint_indicies)
+                    # Iterate over rotamers and check backbone RMSD
+                    for current_rotamer in current_rotamer_library:
 
-                        # Iterate over rotamers and check backbone RMSD
-                        for current_rotamer in current_rotamer_library:
+                        # Apply torsions from rotamer to test motif resdiue
+                        current_rotamer_chis = current_rotamer.chi()
+                        sample_motif_rotamers.set_all_chi(current_rotamer_chis)
 
-                            # Apply torsions from rotamer to test motif resdiue
-                            current_rotamer_chis = current_rotamer.chi()
-                            sample_motif_rotamers.set_all_chi(current_rotamer_chis)
+                        # Calculate rotation/translation by hand using first three residues of ligand
+                        mobile_motif_coords = rosetta.numeric.xyzTransform_double_t(
+                            sample_motif_rotamers.xyz(atm_1),
+                            sample_motif_rotamers.xyz(atm_2),
+                            sample_motif_rotamers.xyz(atm_3),
+                            )
+                        mobile_motif_inverse = mobile_motif_coords.inverse()
 
-                            # This doesn't seem to work...
-                            # sample_motif_rotamers.orient_onto_residue(pyrosetta_motif_residue)
+                        motif_rotation = target_motif_coords.R * mobile_motif_inverse.R
+                        motif_translation = target_motif_coords.R * mobile_motif_inverse.t + target_motif_coords.t
 
-                            # Calculate rotation/translation by hand using first three residues of ligand
-                            mobile_motif_coords = rosetta.numeric.xyzTransform_double_t(
-                                sample_motif_rotamers.xyz(atm_1),
-                                sample_motif_rotamers.xyz(atm_2),
-                                sample_motif_rotamers.xyz(atm_3),
-                                )
-                            mobile_motif_inverse = mobile_motif_coords.inverse()
+                        # Apply transformation
+                        sample_motif_rotamers.apply_transform_Rx_plus_v(motif_rotation, motif_translation)
 
-                            motif_rotation = target_motif_coords.R * mobile_motif_inverse.R
-                            motif_translation = target_motif_coords.R * mobile_motif_inverse.t + target_motif_coords.t
+                        # --- Repeat code, but whatever --- #
 
-                            # Apply transformation
-                            sample_motif_rotamers.apply_transform_Rx_plus_v(motif_rotation, motif_translation)
+                        match_neighbors = [position for position in range(1, match_pose_size) if sample_motif_rotamers.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 4]
+                        print(match_neighbors)
 
-                            # DEBUGGING
-                            motif_pose.append_residue_by_jump(sample_motif_rotamers.clone(), 1)
+                        # Test current motif rotamer against match neighbors
+                        motif_bb_atoms = sample_motif_rotamers.mainchain_atoms()
+                        motif_mainchain_coords = np.asarray([list(sample_motif_rotamers.xyz(atom)) for atom in motif_bb_atoms])
 
-                            # --- Repeat code, but whatever --- #
+                        for match_position in match_neighbors:
+                            match_neighbor_residue = match_pose.residue(match_position)
+                            match_neighbor_residue_bb_atoms = match_neighbor_residue.mainchain_atoms()
+                            match_mainchain_coords = np.asarray([list(match_neighbor_residue.xyz(atom)) for atom in match_neighbor_residue_bb_atoms])
+                            mainchain_rmsd = prody.calcRMSD(match_mainchain_coords, motif_mainchain_coords)
 
-                            match_neighbors = [position for position in range(1, match_pose_size) if sample_motif_rotamers.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 6]
-                            print(match_neighbors)
+                            if mainchain_rmsd < 2:
+                                compatible_match_positions.add(match_position)
+                                accept_current_motif = True
 
-                            # Test current motif rotamer against match neighbors
-                            motif_bb_atoms = sample_motif_rotamers.mainchain_atoms()
-                            motif_mainchain_coords = np.asarray([list(sample_motif_rotamers.xyz(atom)) for atom in motif_bb_atoms])
+                    # Add residue identity to residue_match_mapping
+                    for position in compatible_match_positions:
 
-                            for match_position in match_neighbors:
-                                match_neighbor_residue = match_pose.residue(match_position)
-                                match_neighbor_residue_bb_atoms = match_neighbor_residue.mainchain_atoms()
-                                match_mainchain_coords = np.asarray([list(match_neighbor_residue.xyz(atom)) for atom in match_neighbor_residue_bb_atoms])
-                                mainchain_rmsd = prody.calcRMSD(match_mainchain_coords, motif_mainchain_coords)
+                        # Don't mess with CPG residues
+                        new_resname = pyrosetta_motif_residue.name1()
+                        if new_resname in ['C', 'P', 'G']:
+                            continue
 
-                                if mainchain_rmsd < 2:
-                                    accept_current_motif = True
-                                    break
+                        # contact_info = ((atm_1, atm_2, atm_3), [list(pyrosetta_motif_residue.xyz(atm_1)), list(pyrosetta_motif_residue.xyz(atm_2)), list(pyrosetta_motif_residue.xyz(atm_3))])
+                        contact_info = ((atm_1, atm_2, atm_3), current_motif_coord_list)
+                        # contact_info = ((atm_1, atm_2, atm_3), motif_residue_transformed)
 
-                            if accept_current_motif:
-                                break
+                        if new_resname in match_residue_map[position].keys():
+                            match_residue_map[position][new_resname].append(contact_info)
+                        else:
+                            match_residue_map[position][new_resname] = [contact_info]
 
                     if not accept_current_motif:
                         print(f'{motif_residue_transformed.getData("contact_source")[0]} cannot be accommodated by the current match!\n')
@@ -1471,7 +1508,6 @@ class Generate_Fuzzball_using_PyRosetta(object):
                 # --- Add residue to fuzzball if all filters are passed --- #
 
                 # Set resnum, occupany, coordset
-                # motif_residue_transformed.setResnums([current_conformer_fuzzball.numResidues() + 1] * len(motif_residue_transformed))
                 resnum_count += 1
                 motif_residue_transformed.setResnums([resnum_count] * len(motif_residue_transformed))
                 motif_residue_transformed.setAltlocs([' '] * len(motif_residue_transformed))
@@ -1496,7 +1532,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
             return current_conformer_fuzzball, resnum_count
 
         # Apply banned residue filter to motif_residue_attributes_df
-        banned_resnames = {'ALA', 'GLY', 'PRO', 'CYS', 'GLN', 'ASN', 'GLU', 'ASP', 'ARG'}
+        banned_resnames = {'ALA', 'GLY', 'PRO', 'CYS'}
+        if iteration:
+            banned_resnames = banned_resnames.union({ 'GLN', 'ASN', 'GLU', 'ASP', 'ARG'})
+
         working_resnames = list(set(self.resnames) - banned_resnames)
         self.motif_residue_attributes_df = self.motif_residue_attributes_df[self.motif_residue_attributes_df['resname'].isin(working_resnames)]
 
@@ -1541,10 +1580,16 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         # --- Output fuzzballs --- #
 
-        fuzzball_name = iteration_name if iteration_name else conformer
-        print(fuzzball_name)
+        if match_pdb:
+            # todo: UPDATE THIS TO REFLECT CURRENT SETUP
+            match_residue_map_curated = {int(key): value for key, value in match_residue_map.items() if len(value.keys()) > 0 and key not in motif_resnums}
 
+            with open(os.path.join(self.fuzzball_dir, f'fuzz_{fuzzball_index}-match_residue_map.pickle'), 'wb') as match_residue_pickle:
+                pickle.dump(match_residue_map_curated, match_residue_pickle)
+
+        fuzzball_name = iteration_name if iteration_name else conformer
         print(f'\n{current_conformer_fuzzball.numResidues() - 1} motif residues found for {conformer}!\n')
+
         fuzzball_identifier = f'{fuzzball_name}-iter_{iteration_index}-fuzz_{fuzzball_index}'
         current_conformer_fuzzball_path = os.path.join(self.fuzzball_dir, fuzzball_identifier)
 
