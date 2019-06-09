@@ -3,8 +3,8 @@
 import os
 import sys
 import copy
-import json
 import math
+import pickle
 import random
 import shutil
 from pprint import pprint
@@ -184,7 +184,7 @@ def mc_crystallize(user_defined_dir, match_path, fuzzball_dir, fuzzball_index, p
 
     my_options = [f"-extra_res_fa {os.path.join(user_defined_dir, 'Inputs', 'Rosetta_Inputs', f'{conformer_name}.params')}",
                   "-mute core.conformation core.chemical",
-                  '-ex1 -ex2 -ex3 -extrachi_cutoff 0']
+                  '-ex1 -ex2 -ex3 -extrachi_cutoff 0 -ex1_sample_level 7 -ex2_sample_level 7 -ex3_sample_level 7']
     pyrosetta.init(options=' '.join(my_options))
 
     # Create match pose
@@ -208,7 +208,7 @@ def mc_crystallize(user_defined_dir, match_path, fuzzball_dir, fuzzball_index, p
 
     # --- Load viable scaffold positions and corresponding residue types --- #
 
-    match_residue_map_temp = json.load(open(os.path.join(fuzzball_dir, f'fuzz_{fuzzball_index}-match_residue_map.json'), 'r'))
+    match_residue_map_temp = pickle.load(open(os.path.join(fuzzball_dir, f'fuzz_{fuzzball_index}-match_residue_map.pickle'), 'r'))
 
     # Only consider non-CGP positions
     match_residue_map = dict()
@@ -445,6 +445,7 @@ def mc_crystallize(user_defined_dir, match_path, fuzzball_dir, fuzzball_index, p
     write_solutions_to_pdb(match_path, solution_list, viable_rotamers, use_cluster_scratch=True, block_count=block_count, max_score=base_match_score)
 
     return solution_list
+
 
 def write_solutions_to_pdb(match_path, solution_list, viable_rotamers, output_dir=os.getcwd(), use_cluster_scratch=True, block_count=0, max_score=0, max_solutions=10000):
     """
