@@ -17,9 +17,11 @@ def gurobi_setup(args, bsff_config_dict):
     """
     from ..gurobi_scoring import score_with_gurobi
 
+    # todo: look into making bb atoms virtual when generating FeatureReporter
     gurobi = score_with_gurobi(args['<user_defined_dir>'], args['<current_iteration_fuzzball_dir>'], config_dict=bsff_config_dict)
     gurobi.generate_feature_reporter_db()
     gurobi.consolidate_scores_better()
+
 
 def mc_solve(args):
     """
@@ -63,6 +65,7 @@ def mc_solve(args):
     if block_count is None:
         print('block_count is None...')
         raise SystemExit
+
     # Select a fuzzball
     fuzzball_path = fuzzballs[task_id]
     montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=block_count)

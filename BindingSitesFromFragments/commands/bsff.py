@@ -37,7 +37,17 @@ def main():
 
     # Interpret command line args
     argv = sys.argv[1:]
-    registered_commands = ['new', 'search', 'align', 'cluster', 'assemble', 'gurobi_setup', 'constraints', 'mcsolve', 'crystallize']
+    registered_commands = ['new',
+                           'search',
+                           'align',
+                           'cluster',
+                           'assemble',
+                           'gurobi_setup',
+                           'constraints',
+                           'mcsolve',
+                           'crystallize',
+                           'benchmark',
+                           ]
 
     if len(argv) == 0 or argv[0] not in registered_commands:
         args = docopt(__doc__)
@@ -79,4 +89,10 @@ def main():
     if argv[0] == 'crystallize':
         from .bsff_assemble import crystallize
         crystallize(docopt(crystallize.__doc__, argv=argv))
+
+    # If benchmark, pass things off to benchmark manager
+    if argv[0] == 'benchmark':
+        from .bsff_benchmark import bm_handler
+        bm_handler(argv)
+
 

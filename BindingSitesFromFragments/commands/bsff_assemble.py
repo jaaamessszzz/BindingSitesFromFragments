@@ -17,13 +17,16 @@ def assemble(args):
     Usage:
       bsff assemble <user_defined_dir> [options]
       bsff assemble <user_defined_dir> iteration <selected_match_dir> [options]
+      bsff assemble <user_defined_dir> existing <existing_complex_path> [options]
 
     Arguments:
       <user_defined_dir>              Path to project root directory
+      existing                        Generate a fuzzball for an existing protein-ligand complex (e.g. from the PDB)
+      <existing_complex_path>         Path to an existing pritein-ligand complex
       iteration                       Add motif residues from a previous iteration
       <selected_match_dir>            Path to directory containing selected matches using `prepare_match_iterations.py`
 
-    Options:f
+    Options:
       --previous_iteration=<dir>      Directory containing previous iteration fuzzballs
       --current_iteration=<dir>       Name for directory for current iteration fuzzballs
       --add_user_defined_motifs       Add any motif residues defined under `Inputs/Defined_Interactions` to the fuzzball
