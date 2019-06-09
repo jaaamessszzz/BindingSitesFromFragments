@@ -10,6 +10,7 @@ import numpy as np
 import re
 
 from rdkit import Chem
+from pyrosetta import rosetta
 
 def generate_new_project():
     """
@@ -103,10 +104,22 @@ def find_conformer_and_constraint_resnums(pdb_name):
     conformer_id = pdb_split[conformer_id_index]
     conformer_name = '{}_{}'.format(ligand_name, conformer_id)
 
-    constraint_resnum_block = re.split('-|\.', pdb_name)[1][:-2]
+    constraint_resnum_block = re.split('-|\.', pdb_name)[1]
     constraint_resnums = [int(a) for a in constraint_resnum_block.split('_') if a != ''][1:]
 
     return conformer_name, constraint_resnums
+
+
+def determine_matched_residue_positions(match_pdb_path):
+    """
+    Parse the filename of the match PDB to determine IDs and positions of match residues
+    :return:
+    """
+    positions_block = os.path.basename(os.path.normpath(match_pdb_path)).split('_')[2]
+    resnames = [a for a in re.split("[0-9]*", positions_block) if a]
+    resnums = [int(a) for a in re.split("[a-zA-Z]*", positions_block) if a]
+
+    return [(a, b) for a, b in zip(resnames, resnums)]
 
 
 def RDKit_Mol_from_ProDy(prody_instance, removeHs=True):
@@ -118,3 +131,54 @@ def RDKit_Mol_from_ProDy(prody_instance, removeHs=True):
     prody.writePDBStream(residue_io, prody_instance)
 
     return Chem.MolFromPDBBlock(residue_io.getvalue(), removeHs=removeHs)
+
+
+# --- PyRosetta Utils --- #
+
+def find_binding_motif_clashes(pose, sfxn, residue_index_list):
+    """
+    Returns the largest fa_rep value for any of the motif residues and ligand where all other residues in the match
+    scaffold are mutated to ALA
+    :param pose:
+    :param residue_index_list:
+    :return:
+    """
+    ligand_index = pose.size()
+    motif_and_ligand_idx = residue_index_list + [ligand_index]
+
+    sfxn(pose)  # Redundant
+    edges = pose.energies().energy_graph()
+
+    # --- Calculate max fa_rep for each motif residue --- #
+    fa_rep_list = []
+    fa_sol_list = []
+
+    for motif_res in motif_and_ligand_idx:
+        for res in range(1, ligand_index):
+            if res not in motif_and_ligand_idx:
+                current_edge = edges.find_energy_edge(motif_res, res)
+                if current_edge is not None:
+                    current_edge.fill_energy_map()
+                    fa_rep_list.append(current_edge[rosetta.core.scoring.fa_rep])
+                    fa_sol_list.append(current_edge[rosetta.core.scoring.fa_sol])
+
+    return max(fa_rep_list), max(fa_sol_list)
+
+def get_rotation_and_translation(mobile, target):
+    """
+
+    :param mobile: rosetta.numeric.xyzTransform_double_t
+    :param target: rosetta.numeric.xyzTransform_double_t
+    :return:
+    """
+
+    # Calculate rotation/translation by hand using first three residues of ligand
+    mobile_inverse = mobile.inverse()
+
+    mobile_rotation = target.R * mobile_inverse.R
+    mobile_translation = target.R * mobile_inverse.t + target.t
+
+    # Apply transformation
+    return mobile_rotation, mobile_translation
+
+
