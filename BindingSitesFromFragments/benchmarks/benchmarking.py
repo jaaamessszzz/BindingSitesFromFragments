@@ -36,11 +36,11 @@ import appdirs
 import xmltodict
 import urllib
 
-from .fragments import Fragments
-from .alignments import Fragment_Alignments
-from .clustering import Cluster
-from .motifs import Generate_Motif_Residues, Generate_Binding_Sites, Generate_Constraints
-from .utils import *
+from BindingSitesFromFragments.fragments import Fragments
+from BindingSitesFromFragments.alignments import Fragment_Alignments
+from BindingSitesFromFragments.clustering import Cluster
+from BindingSitesFromFragments.motifs import Generate_Motif_Residues, Generate_Binding_Sites, Generate_Constraints
+from BindingSitesFromFragments.utils import *
 
 def fetch_ligands(df):
     """
