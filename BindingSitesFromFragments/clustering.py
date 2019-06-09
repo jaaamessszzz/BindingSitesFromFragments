@@ -2,10 +2,12 @@
 
 import os
 import sys
-import numpy as np
-import prody
-import pandas as pd
 from pprint import pprint
+
+import prody
+import numpy as np
+import pandas as pd
+from scipy.cluster.hierarchy import linkage, fcluster
 
 from .utils import *
 
@@ -17,9 +19,8 @@ class Cluster(object):
     This class is responsible for taking aligned fragment PDBs and identifying representative contacts. 
     """
 
-    def __init__(self, processed_PDBs_dir, weights):
+    def __init__(self, processed_PDBs_dir):
         self.processed_PDBs_dir = processed_PDBs_dir
-        self.weights = weights
         self.pdb_object_list = self._import_pdbs()
         self.clusters = None
         self.df = None
@@ -34,17 +35,18 @@ class Cluster(object):
         processsed_residue_list = []
         for pdb in pdb_check(self.processed_PDBs_dir):
             pdb_info = os.path.basename(os.path.normpath(pdb))
-            prody_protein = prody.parsePDB(pdb).select('protein and not hetatm')
+
             # Check that residues exist within cutoff distance provided in alignments, otherwise pass
-            if prody_protein == None:
+            prody_protein_selection = prody_protein.select('protein and not hetatm')
+            if prody_protein_selection == None:
                 continue
             else:
-                prody_protein_hv = prody_protein.getHierView()
+                prody_protein_hv = prody_protein_selection.getHierView()
 
             prody_ligand = prody.parsePDB(pdb).select('hetatm and resname {}'.format(pdb_info.split('_')[1]))
 
             # Iterate over residues in contacts and generate representative vector with weights applied
-            processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand, self.weights) for residue in prody_protein_hv.iterResidues()]
+            processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand,) for residue in prody_protein_hv.iterResidues()]
 
         processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.vector is not None]
 
@@ -56,27 +58,8 @@ class Cluster(object):
         :return: 
         self.clusters: list of indicies corresponding to cluster numbers for each element in self.pdb_object_list
         """
-        from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
-        from matplotlib import pyplot as plt
-
         vector_array = np.asarray([thingy.vector for thingy in self.pdb_object_list])
         Z = linkage(vector_array, 'ward')
-
-        if display_dendrogram == True:
-            # Generate dendrogram
-            # todo: CHANGE THIS. Taken straight from https://joernhees.de/blog/2015/08/26/scipy-hierarchical-clustering-and-dendrogram-tutorial
-            fig = plt.figure(figsize=(25, 10))
-            plt.title('Hierarchical Clustering Dendrogram')
-            plt.xlabel('sample index')
-            plt.ylabel('distance')
-            ax = fig.gca()
-            ax.set_ylim(5)
-            dendrogram(
-                Z,
-                leaf_rotation=90.,  # rotates the x axis labels
-                leaf_font_size=8.,  # font size for the x axis labels
-            )
-            plt.show()
 
         self.distance_cutoff = 2**0.5
         self.clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
@@ -157,10 +140,10 @@ class Cluster(object):
         :return: 
         """
         # Determine spread in min ligand-residue atom contact unit vectors
-        atom_atom_centroid_vector = np.mean([residue[1].contact_unit_vector for residue in residue_list], axis=0)
-        atom_atom_angle_deviations = [np.arccos(np.dot(atom_atom_centroid_vector, residue[1].contact_unit_vector)) for residue in residue_list]
-        atom_atom_mean = np.degrees(np.mean(atom_atom_angle_deviations))
-        atom_atom_SD = np.degrees(np.std(atom_atom_angle_deviations))
+        # atom_atom_centroid_vector = np.mean([residue[1].contact_unit_vector for residue in residue_list], axis=0)
+        # atom_atom_angle_deviations = [np.arccos(np.dot(atom_atom_centroid_vector, residue[1].contact_unit_vector)) for residue in residue_list]
+        # atom_atom_mean = np.degrees(np.mean(atom_atom_angle_deviations))
+        # atom_atom_SD = np.degrees(np.std(atom_atom_angle_deviations))
 
         # 20170901 - I've determined that the atom-centroid mean and SD aren't useful metrics...
         # Determine spread in unit vectors connecting min ligand contact atom and residue centroids
@@ -176,8 +159,8 @@ class Cluster(object):
         return {'cluster_index': cluster_number,
                 'cluster_members': len(residue_list),
                 'cutoff': self.distance_cutoff,
-                'atom-atom_mean': atom_atom_mean,
-                'atom-atom_SD': atom_atom_SD
+                # 'atom-atom_mean': atom_atom_mean,
+                # 'atom-atom_SD': atom_atom_SD
                 }
 
     def automated_cluster_selection(self):
@@ -211,10 +194,10 @@ class Cluster(object):
         print('Selected clusters:')
         pprint(selected_cluster_rows)
 
-        with open(motif_yaml_path, 'a') as motif_yaml:
-            motif_yaml.write('{}:\n'.format(current_fragment))
-            for index, row in selected_cluster_rows.iterrows():
-                motif_yaml.write('- {}\n'.format(int(row['cluster_index'])))
+        # with open(motif_yaml_path, 'a') as motif_yaml:
+        #     motif_yaml.write('{}:\n'.format(current_fragment))
+        #     for index, row in selected_cluster_rows.iterrows():
+        #         motif_yaml.write('- {}\n'.format(int(row['cluster_index'])))
 
 class fragment_PDB(object):
     """
@@ -226,22 +209,12 @@ class fragment_PDB(object):
     :param pdbid:
     :param vector:
     """
-    def __init__(self, prody_residue, pdb_info, prody_ligand, weights):
-        self.prody_residue = prody_residue
-        self.prody_ligand = prody_ligand
+    def __init__(self, prody_residue, pdb_info, prody_ligand):
         self.pdb_info = pdb_info
-        self.distance_cutoff = 4 #Angstroms
-        self.residue_center = prody.calcCenter(prody_residue)
-        self.ligand_center = prody.calcCenter(prody_ligand)
-        self.weights = weights
-        self.vector = self.process_residue_into_vector()
+        self.prody_residue = prody_residue
+        self.vector = self.process_residue_into_vector(prody_ligand, prody_residue)
 
-        # For cluster evaluation, assigned in process_residue_into_vector()
-        # Not a great practice, but meh...
-        # self.min_contact_distance
-        # self.contact_unit_vector
-
-    def process_residue_into_vector(self):
+    def process_residue_into_vector(self, prody_ligand, prody_residue, distance_cutoff=4):
         """
         Converting each residue into a representative vector
 
@@ -279,24 +252,24 @@ class fragment_PDB(object):
         :return: 
         """
 
-        min_contact_distance, row_index_low, column_index_low = minimum_contact_distance(self.prody_residue, self.prody_ligand, return_indices=True)
+        min_contact_distance, row_index_low, column_index_low = minimum_contact_distance(prody_residue, prody_ligand, return_indices=True)
         polar_residues = ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'ARG', 'SER', 'THR', 'TYR']
 
         distance_cutoff_polar = 3.5
         distance_cutoff_greasy = 4
 
-        if all([self.prody_residue.getResnames()[0] in polar_residues, min_contact_distance > distance_cutoff_polar]):
+        if all([prody_residue.getResnames()[0] in polar_residues, min_contact_distance > distance_cutoff_polar]):
             return None
 
         elif min_contact_distance > distance_cutoff_greasy:
             return None
 
         else:
-            residue_contact_atom = self.prody_residue.copy().select('index {}'.format(row_index_low))
-            ligand_contact_atom = self.prody_ligand.copy().select('index {}'.format(column_index_low))
+            residue_contact_atom = prody_residue.copy().select('index {}'.format(row_index_low))
+            ligand_contact_atom = prody_ligand.copy().select('index {}'.format(column_index_low))
 
             # Save min contact residue and ligand atom indicies for evaluating cluster quality later
-            self.min_contact_distance = min_contact_distance
+            # self.min_contact_distance = min_contact_distance
 
             # Residue Contact Type
             residue_contact_type = 0 if residue_contact_atom.getNames()[0] in ['C', 'CA', 'N', 'O'] else 1
@@ -305,8 +278,8 @@ class fragment_PDB(object):
             ligand_contact_type = 1 if ligand_contact_atom.getNames()[0][0] in ['C'] else 0
 
             # Vector from fragment centroid to closest residue atom
-            contact_vector = (residue_contact_atom.getCoords() - self.ligand_center)[0]
-            self.contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
+            contact_vector = (residue_contact_atom.getCoords() - prody.calcCenter(prody_ligand))[0]
+            contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
 
             # Side chain has hydrogen bond donor/acceptor (DEHKNQRSTY)
             h_bond_donor_acceptor = 1 if residue_contact_atom.getResnames()[0] in polar_residues else 0
@@ -335,23 +308,23 @@ class fragment_PDB(object):
             bb_c_ca = 1 if residue_contact_atom.getNames()[0] in ['C', 'CA'] else 0
 
             residue_vector = [
-                self.contact_unit_vector[0] * self.weights[0],
-                self.contact_unit_vector[1] * self.weights[0],
-                self.contact_unit_vector[2] * self.weights[0],
-                (self.min_contact_distance / self.distance_cutoff) * self.weights[0],
-                residue_contact_type * self.weights[1],
-                ligand_contact_type * self.weights[1],
-                h_bond_donor_acceptor * self.weights[1],
-                greasy_ali * self.weights[2],
-                greasy_aro * self.weights[2],
-                polar * self.weights[2],
-                charged_acid * self.weights[2],
-                charged_basic * self.weights[2],
-                glycine * self.weights[2],
-                proline * self.weights[2],
-                bb_carbonyl * self.weights[3],
-                bb_amino * self.weights[3],
-                bb_c_ca * self.weights[3]
+                contact_unit_vector[0],
+                contact_unit_vector[1],
+                contact_unit_vector[2],
+                (min_contact_distance / distance_cutoff),
+                residue_contact_type,
+                ligand_contact_type,
+                h_bond_donor_acceptor,
+                greasy_ali,
+                greasy_aro,
+                polar,
+                charged_acid,
+                charged_basic,
+                glycine,
+                proline,
+                bb_carbonyl,
+                bb_amino,
+                bb_c_ca
             ]
 
             return np.asarray(residue_vector)
