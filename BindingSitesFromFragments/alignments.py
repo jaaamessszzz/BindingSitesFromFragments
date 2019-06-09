@@ -181,6 +181,11 @@ class Align_PDB_Factory(object):
 
                                 if rmsd < rmsd_cutoff:
                                     transformed_pdb = align.apply_transformation(pdb_path, ligand_resnum, target_fragment_atom_serials, transformation_matrix)
+
+                                    # Continue if transformed_pdb - ligand is None
+                                    if transformed_pdb.select(f'not {ligand_resname}') is None:
+                                        continue
+
                                     transformed_pdb_name = f'{pdbid}_{ligand_resname}_{ligand_chain}_{ligand_resnum}-{count}.pdb'
                                     prody.writePDB(os.path.join(processed_dir, transformed_pdb_name), transformed_pdb)
                                     rmsd_success = True
@@ -367,7 +372,6 @@ class Align_PDB(object):
         pdb_prody_hv = prody.parsePDB(pdb_file, altloc=True).getHierView()
         relevant_ligands_prody_dict = dict()
 
-        # todo: only consider biological assemblies, we want to avoid duplicate observations in the fuzzball
         for ligand_chain, ligand_resnum, res in relevant_ligand_resnums:
 
             ligand_pdb_prody = pdb_prody_hv.getResidue(ligand_chain, ligand_resnum)
