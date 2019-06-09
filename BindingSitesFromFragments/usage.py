@@ -23,10 +23,12 @@ Usage:
     bsff search <user_defined_dir>
     bsff align <user_defined_dir>
     bsff cluster <user_defined_dir> [options]
-    bsff gurobi <user_defined_dir>
+    bsff gurobi <user_defined_dir> <path_to_fuzzball>
     bsff classic_gurobi_constraints <user_defined_dir> [iteration] <gurobi_solutions_csv_dir> [-t <tolerance>] [-s <samples>] [-g] [-j]
     bsff score <user_defined_dir>
     bsff assemble <user_defined_dir>
+
+    bsff <command> [<args>...]
 
 Arguments:
     new
@@ -208,11 +210,7 @@ def main():
                 continue
 
             print(f'Processing {fragment_name}...')
-
-            # Set weights
-            weights = [int(a) for a in args['--weights'].split()] if args['--weights'] else [1, 1, 1, 1]
-
-            cluster = Cluster(fragment, weights)
+            cluster = Cluster(fragment)
 
             if len(cluster.pdb_object_list) > 2:
                 cluster.cluster_scipy()
@@ -224,20 +222,18 @@ def main():
     if args['gurobi']:
         from .gurobi_scoring import score_with_gurobi
         gurobi = score_with_gurobi(args['<user_defined_dir>'], config_dict=bsff_config_dict)
-        gurobi.generate_feature_reporter_db()
-        gurobi.consolidate_scores_better()
-        # gurobi.do_gurobi_things()
+        gurobi.generate_feature_reporter_db(args['<path_to_fuzzball>'])
+        gurobi.consolidate_scores_better(args['<path_to_fuzzball>'])
 
     if args['classic_gurobi_constraints']:
         # todo: add option for number of constraints to generate
-        # todo: add option for iterations
         generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
-        generate_constraints.import_res_idx_map()
+        # generate_constraints.import_res_idx_map()
 
         tolerance = int(args['--tolerances']) if args['--tolerances'] else 5
         samples = int(args['--samples']) if args['--samples'] else 1
         generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'],
-                                                                            constraints_to_generate=5000,
+                                                                            constraints_to_generate=10000,
                                                                             offset=0,
                                                                             iteration=args['iteration'],
                                                                             angle_dihedral_tolerance=tolerance,
@@ -250,10 +246,19 @@ def main():
         derp.score_motif_conformer_interactions()
 
     if args['assemble']:
-        derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'])
+        # Make directory for Fuzzballs
+        fuzzball_dir = os.path.join(args['<user_defined_dir>'], 'Fuzzballs')
+        os.makedirs(fuzzball_dir, exist_ok=True)
+
+        # Dump current iteration of fuzzballs into own directory
+        iteration = len([x for x in os.listdir(fuzzball_dir) if os.path.isdir(os.path.join(fuzzball_dir, x))])
+        current_iteration_dir = os.path.join(fuzzball_dir, f'Iteration-{iteration}')
+        os.makedirs(current_iteration_dir, exist_ok=True)
+
+        derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'], current_iteration_dir)
 
         with open(os.path.join(derp.fuzzball_dir, 'fuzzball_list.txt'), 'w') as fuzzy_fuzz:
             for conformer in pdb_check(derp.rosetta_inputs, base_only=True, conformer_check=True):
                 conformer_name = conformer.split('.')[0]
-                fuzzball_path = derp.assemble_fuzzball(conformer_name)
+                fuzzball_path = derp.assemble_fuzzball(conformer_name, iteration=iteration)
                 fuzzy_fuzz.write(f'{fuzzball_path}\n')
