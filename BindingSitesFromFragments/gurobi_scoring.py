@@ -9,8 +9,6 @@ import subprocess
 
 import pandas as pd
 from .utils import *
-from .motifs import Generate_Motif_Residues
-from gurobipy import *
 
 import pyrosetta
 from pyrosetta import rosetta
@@ -19,11 +17,13 @@ class score_with_gurobi():
     """
     Class for determining best combinations of motif residues using Rosetta's feature reporter system
     """
-    def __init__(self, user_defined_dir, config_dict=None):
+    def __init__(self, user_defined_dir, path_to_fuzzballs, config_dict=None):
         self.user_defined_dir = user_defined_dir
         self.ligand_code = user_defined_dir[:3]
         self.resources_dir = os.path.join(os.path.dirname(__file__), '..', 'Additional_Files')
         self.user_config = config_dict
+        self.path_to_fuzzballs = path_to_fuzzballs
+        self.iteration_dir_base = os.path.normpath(os.path.basename(path_to_fuzzballs))
 
     def generate_feature_reporter_db(self):
         """
@@ -31,18 +31,22 @@ class score_with_gurobi():
         :return: 
         """
 
-        rosettascripts_path = os.path.join(self.user_config['Rosetta_path'], 'main/source/bin/rosetta_scripts.{}'.format(self.user_config['Rosetta_compiler']))
+        rosettascripts_path = os.path.join(self.user_config['Rosetta_path'], f'main/source/bin/rosetta_scripts.{self.user_config["Rosetta_compiler"]}')
 
+        # todo: Convert this to PyRosetta to remove necessity of bsff_config
         run_feature_reporter = subprocess.Popen([rosettascripts_path, # UPDATE
                                                  '-parser:protocol',
                                                  os.path.join(self.resources_dir, 'RosettaScripts', 'Two_body_residue_feature_reporter.xml'),
                                                  '-out:nooutput',
                                                  '-parser:script_vars',
-                                                 'target={}'.format(self.user_defined_dir),
+                                                 f'target={self.user_defined_dir}',
                                                  '-l',
-                                                 './{}/Motifs/Residue_Ligand_Interactions/Single_Poses/fuzzball_list.txt'.format(self.user_defined_dir),
+                                                 os.path.join(self.path_to_fuzzballs, 'fuzzball_list.txt'),
                                                  '-extra_res_fa',
-                                                 './{}/Inputs/Rosetta_Inputs/Scoring_params/{}.params'.format(self.user_defined_dir, self.ligand_code)
+                                                 f'{self.user_defined_dir}/Inputs/Rosetta_Inputs/Scoring_params/{self.ligand_code}.params',
+                                                 '-parser:script_vars',
+                                                 f'iteration_dir={self.path_to_fuzzballs}',
+                                                 f'iteration_db_id={self.iteration_dir_base}',
                                                  ])
         run_feature_reporter.wait()
 
@@ -57,12 +61,29 @@ class score_with_gurobi():
         merge tables with create new table sum(score_value) group by (batch_id, struct_id, resNum1, resNum2)
         :return: 
         """
-        connection = sqlite3.connect('./{}/two_body_terms.db'.format(self.user_defined_dir))
+        connection = sqlite3.connect(f'{self.path_to_fuzzballs}/{self.iteration_dir_base}.db')
         cursor = connection.cursor()
 
+        # Add mapping between fuzzball struct_id and fuzzball name (required for iterations)
+        fuzzball_mapping_list = list()
+        fuzzball_txt_path = os.path.join(self.path_to_fuzzballs, 'fuzzball_list.txt')
+        with open(fuzzball_txt_path, 'r') as fuzzy_txt:
+            for index, fuzzball in enumerate(fuzzy_txt):
+                fuzzball_name = os.path.basename(os.path.normpath(fuzzball)).split('.')[0]
+                fuzzball_mapping_list.append({'index': index + 1, 'fuzzball_name': fuzzball_name})
+
+        fuzzball_mapping_df = pd.DataFrame(fuzzball_mapping_list)
+        fuzzball_mapping_df.to_sql('fuzzball_mapping', con=connection, if_exists='replace')
+
         # Generate new table with residue-index mappings from .csv
-        df = pd.read_csv(os.path.join(f'{self.user_defined_dir}', 'motif_residue_attributes.csv'), index_col=0)
-        df.to_sql('residue_index_mapping', con=connection, if_exists='replace')
+        reverse_mapping = {row['fuzzball_name']:row['index'] for index, row in fuzzball_mapping_df.iterrows()}
+        print(reverse_mapping)
+        for file in os.listdir(self.path_to_fuzzballs):
+            if file.endswith('.csv'):
+                df = pd.read_csv(os.path.join(self.path_to_fuzzballs, file), index_col=0)
+                struct_id = reverse_mapping[file.split('.')[0]]
+                df['struct_id'] = struct_id
+                df.to_sql('residue_index_mapping', con=connection, if_exists='append')
 
         cursor.execute(
             """CREATE TABLE relevant_2b_scores AS
@@ -95,30 +116,12 @@ class score_with_gurobi():
             """
         )
 
-            # Old query...
-
-            # """CREATE TABLE relevant_2b_scores AS
-            # SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
-            # residue_scores_2b.resNum2, score_types.score_type_name, residue_scores_2b.score_value from residue_scores_2b
-            # left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where
-            # (score_types.score_type_name = 'fa_atr' or
-            # score_types.score_type_name = 'fa_elec' or
-            # score_types.score_type_name = 'hbond_sc' or
-            # score_types.score_type_name = 'hbond_bb_sc')
-            # UNION
-            # SELECT residue_scores_2b.batch_id, residue_scores_2b.struct_id, residue_scores_2b.resNum1,
-            # residue_scores_2b.resNum2, score_types.score_type_name, (residue_scores_2b.score_value * 1.00) from residue_scores_2b
-            # left join score_types on residue_scores_2b.score_type_id == score_types.score_type_id where
-            # (score_types.score_type_name = 'fa_rep')
-            # """
-
         # Free up space
         cursor.execute("DROP TABLE IF EXISTS batch_reports")
         cursor.execute("DROP TABLE IF EXISTS features_reporters")
         cursor.execute("DROP TABLE IF EXISTS residue_scores_lr_2b")
         cursor.execute("DROP TABLE IF EXISTS residue_scores_2b")
         cursor.execute("DROP TABLE IF EXISTS residue_scores_1b")
-        cursor.execute("DROP TABLE IF EXISTS residues")
         cursor.execute("DROP TABLE IF EXISTS score_types")
         cursor.execute("DROP TABLE IF EXISTS sampled_structures")
         cursor.execute("DROP TABLE IF EXISTS structures")
