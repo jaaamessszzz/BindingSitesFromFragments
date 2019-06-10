@@ -94,6 +94,7 @@ def main():
     generate_params_files(args['<compound_id>'])
 
     # Generate conformer library for scoring later
+    # todo: configure Rosetta path to user settings in config file
     run_mol_to_params = subprocess.run( ['/Users/jameslucas/Rosetta/main/source/scripts/python/public/molfile_to_params.py',
                                          args['<input_mol>'],
                                          '-n',
