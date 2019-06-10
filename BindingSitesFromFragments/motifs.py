@@ -733,6 +733,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                 apply transformation to residue
 
             load transformed residues and current conformer as Pose in PyRosetta (prody > PDBStream > PyRosetta)
+            load transformed residues and current conformer as Pose in PyRosetta (prody > PDBStream > PyRosetta)
             score pose
             save relevant metrics into a dataframe (contact REU, hbond energy, hbond contact atom on ligand)
 
@@ -1169,19 +1170,44 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         return current_conformer_fuzzball
 
-    def map_atoms_onto_existing_ligand_conmplex(self, existing_complex_path):
+    def assemble_fuzzball_for_existing_complex(self, existing_complex_path, complex_ligand_id=None):
         """
         Map ligand atom names from a Rosetta params file onto the ligand atoms in an existing protein-ligand complex.
         This is required since the method uses the standardized param file atoms names to keep track of unique
         protein-ligand contacts.
+
+        I think I'm going to write this function as a wrapper for assemble_fuzzball()...
         """
 
         # Get all instances of ligand in protein
-        # Use RDKit to map idealized ligand onto existing ligand atoms
-        # Iterate through mapping and assign atom names
-        # Extract ligand and return for fuzzball aseembly
+        if complex_ligand_id is None:
+            complex_ligand_id = self.chemical_component_identifier
 
-        pass
+        existing_complex_prody = prody.parsePDB(existing_complex_path)
+        existing_complex_ligands = existing_complex_prody.select(f'name {complex_ligand_id}')
+        existing_complex_ligands_hv = existing_complex_ligands.getHierView()
+
+        if len(existing_complex_ligands_hv) == 0:
+            raise FailedAssemblyError(f'No ligands with identifier "{complex_ligand_id}" exist in {existing_complex_path}')
+
+        reference_ligand = os.path.join(self.rosetta_inputs, f'{self.chemical_component_identifier}_0001.pdb')
+        reference_ligand_mol = RDKit_Mol_from_ProDy(reference_ligand, removeHs=False)
+
+        # Use RDKit to map idealized ligand onto existing ligand atoms
+        for complex_ligand in existing_complex_ligands_hv.iterResidues():
+            complex_ligand_mol = RDKit_Mol_from_ProDy(complex_ligand, removeHs=False)
+            ligand_mcs = rdFMCS.FindMCS([reference_ligand_mol, complex_ligand_mol], bondCompare=rdFMCS.BondCompare.CompareAny)
+            ligand_mcs_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
+            if complex_ligand_mol.GetNumHeavyAtoms() != ligand_mcs_mol.GetNumHeavyAtoms():
+                complex_ligand_match = complex_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
+                reference_ligand_match = reference_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
+
+                complex_reference_map = {com_idx: ref_idx for com_idx, ref_idx in zip(complex_ligand_match, reference_ligand_match)}
+
+                # Use Scoring_params!
+                # Check that params file specifies conformer PDB, else append
+                # Pull ligand from complex, rename atoms, but back into complex
+                # Need to figure out where to put conformer PDB though... assemble_fuzzball() expects it to be in Rosetta_Inputs
 
     def assemble_fuzzball(self, conformer, add_user_defined_motifs=True, fuzzball_limit=2000, hbond_limit=250,
                           iteration=None, iteration_name=None, iteration_index=0, fuzzball_index=0):
