@@ -12,13 +12,7 @@ import re
 from rdkit import Chem
 from pyrosetta import rosetta
 
-def generate_new_project():
-    """
-    Generate a new project for a specific ligand. Sets up all necessary directory and template files
-    :return: 
-    """
-    pass
-
+# --- Path/file traversal --- #
 
 def directory_check(dir, base_only=False):
     for subdir in os.listdir(dir):
@@ -50,6 +44,7 @@ def processed_check(processed_dir, pdb, rejected_list):
 
     return any([in_reject_list, already_processed])
 
+# --- Common manipulations --- #
 
 def minimum_contact_distance(a_H, b_H, return_indices=False, strip_H=True):
     """
@@ -122,6 +117,109 @@ def determine_matched_residue_positions(match_pdb_path):
     return [(a, b) for a, b in zip(resnames, resnums)]
 
 
+def clean_pdb(input_pdb, ligand_code=None, resnum=None):
+    """
+    Clean PDB. Roland: MSE to MET records, CSE to CYS records, discarding alternative conformations, setting all atom
+    occupancies to 1.0, discarding all residues with any missing main chain atom(s), removing all ligands but the
+    target, and ensuring internal Rosetta numbering
+
+    :param input_pdb: prody of PDB to clean
+    :param ligand_code: chemical component identifier for ligand to keep
+    :param resnum: position of ligand in input_pdb to keep
+    :return:
+    """
+
+    canon_residues = ['ALA', 'CYS', 'SEC', 'ASP', 'GLU',
+                      'PHE', 'GLY', 'HIS', 'ILE', 'LYS',
+                      'LEU', 'MET', 'MSE', 'ASN', 'PRO',
+                      'GLN', 'ARG', 'SER', 'THR', 'VAL',
+                      'TRP', 'TYR']
+
+    # Necessary due to prody things...
+    def _add_to_output(output_atoms, residue):
+        if len(output_atoms) != 0:
+            output_atoms = output_atoms + residue.copy()
+        else:
+            output_atoms = residue.copy()
+        return output_atoms
+
+    # Pirated from Generate_Motif_Residues
+    def _fix_mse_sec(representative_residue, resname):
+        """
+        Takes MSE/SEC and turns it into MET/CYS
+        :param representative_residue: representative_residue with Se
+        :return: representative_residue with S
+        """
+        # Find index of SE
+        res_elements = representative_residue.getElements()
+
+        # If SE is missing due to missing atoms, just return the residue as is
+        if 'SE' not in res_elements:
+            return representative_residue
+
+        # Set SE to S
+        seleno_index = [e for e in res_elements].index('SE')
+        res_elements[seleno_index] = 'S'
+
+        # Set elements to MET
+        representative_residue.setElements(res_elements)
+
+        # Set resnames MSE>MET, SEC>CYS
+        # Set seleno atom name to met/cys atom sulfur atom name
+        if resname == 'MSE':
+            representative_residue.setResnames(['MET'] * len(representative_residue))
+            res_atom_names = representative_residue.getNames()
+            res_atom_names[seleno_index] = 'SD'
+            representative_residue.setNames(res_atom_names)
+        elif resname == 'SEC':
+            representative_residue.setResnames(['CYS'] * len(representative_residue))
+            res_atom_names = representative_residue.getNames()
+            res_atom_names[seleno_index] = 'SG'
+            representative_residue.setNames(res_atom_names)
+        else:
+            raise Exception('Either MSE or SEC had to be set!')
+
+        return representative_residue
+
+    # This selects Altloc A if there are alternate locations at all... makes things easy
+    cleanish_pdb = input_pdb.select('(protein or hetero or nucleic) and not water').copy()
+    hv = cleanish_pdb.getHierView()
+
+    output_atoms = prody.atomgroup.AtomGroup('Output')
+    res_count = 1
+    removed_residues = []
+
+    for chain in hv:
+        for residue in chain:
+            if residue.getResnum() == resnum and residue.getResname() == ligand_code:
+                residue.setResnum(res_count)
+                res_count += 1
+                output_atoms = _add_to_output(output_atoms, residue)
+
+            # Check Backbone atoms, else don't add to output atomgroup
+            elif all(atom in residue.getNames() for atom in ['N', 'C', 'CA']) and residue.getResname() in canon_residues:
+                residue.setResnum(res_count)
+                res_count += 1
+
+                if residue.getResname() in ['MSE', 'SEC']:
+                    residue = _fix_mse_sec(residue, residue.getResname())
+
+                residue.setOccupancies([1] * len(residue))
+                output_atoms = _add_to_output(output_atoms, residue)
+
+            elif residue.getResname() in ['A', 'T', 'C', 'G', 'U']:
+                residue.setResnum(res_count)
+                res_count += 1
+                output_atoms = _add_to_output(output_atoms, residue)
+
+            else:
+                print('Removed {}'.format(residue))
+                removed_residues.append('{0}{1}'.format(residue.getResname(), residue.getResnum()))
+
+    return output_atoms, removed_residues
+
+# --- Type conversion --- #
+
 def RDKit_Mol_from_ProDy(prody_instance, removeHs=True):
     """
     Creates an RDKit Mol object from a ProDy AtomGroup instance
@@ -133,7 +231,7 @@ def RDKit_Mol_from_ProDy(prody_instance, removeHs=True):
     return Chem.MolFromPDBBlock(residue_io.getvalue(), removeHs=removeHs)
 
 
-# --- PyRosetta Utils --- #
+# --- PyRosetta --- #
 
 def find_binding_motif_clashes(pose, sfxn, residue_index_list):
     """
