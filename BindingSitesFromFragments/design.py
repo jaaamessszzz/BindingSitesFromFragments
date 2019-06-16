@@ -428,3 +428,17 @@ def fuzzball_composition_design(user_defined_dir, match_path, match_residue_map,
 
 
 # todo: add new energy method for applying bonus to flagged rotamer variants
+# todo: figure out how to write a design guidance term using this implementation
+
+from rosetta.core.scoring.methods import ContextIndependentOneBodyEnergy
+
+@rosetta.EnergyMethod()
+class FuzzballDesignMethod(ContextIndependentOneBodyEnergy):
+    """
+    Bias design toward contacts observed in the fuzzball
+    """
+    def __init__(self):
+        ContextIndependentOneBodyEnergy.__init__(self, self.creator())
+
+    def residue_energy(self, res, pose, emap):
+        emap.get().set(self.scoreType, -1.0)
