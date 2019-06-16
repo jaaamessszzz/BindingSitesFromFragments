@@ -170,6 +170,7 @@ class Align_PDB_Factory(object):
                             rmsd_success = False
                             for count, mapping in enumerate(fragment_target_map):
 
+                                # todo: refactor to use RDKit's atom.GetMonomerInfo() for atom selections...
                                 # Determine translation vector and rotation matrix
                                 target_coords_and_serials, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, target_ligand_prody)
                                 trgt_atom_coords, target_fragment_atom_serials = target_coords_and_serials
@@ -536,6 +537,7 @@ class Align_PDB(object):
         fragment_atom_indices = [a[0] for a in fragment_target_map]
         target_atom_indices = [a[1] for a in fragment_target_map]
 
+        # todo: refactor this to use RDKit's atom.GetMonomerInfo() method to select atoms by name
         # Convert atom indicies into atom objects
         frag_atom_selections = [self.fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
 
