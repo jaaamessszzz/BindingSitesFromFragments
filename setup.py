@@ -39,8 +39,8 @@ setup(
         'pypdb',
         'pandas',
         'biopython',
+        'seaborn'
         'multiprocess',
-        'mysqlclient',
         'networkx',
         'pathos',
         'prody',
