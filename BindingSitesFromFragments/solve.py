@@ -18,7 +18,7 @@ import pyrosetta
 from pyrosetta import rosetta
 
 
-def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=None):
+def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=None, include_defined=False):
     """
     Use PyRosetta and a simulated annealing monte carlo method to find binding site solutions.
     This method for finding binding motif solutions DOES NOT TAKE CONSTRAINTS INTO CONSIDERATION. This means motif
@@ -52,6 +52,7 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     # Load fuzzball into PyRosetta
     fuzzball_pose = rosetta.core.import_pose.pose_from_file(fuzzball_path)
     fuzzball_size = fuzzball_pose.size()  # Includes ligand
+    print(f'\nFuzzball size: {fuzzball_size}\n')
 
     # Load fuzzball into prody and get defined residues
     fuzzball_base, fuzzball_pdb = os.path.split(fuzzball_path)
@@ -64,10 +65,14 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     motif_pose = rosetta.core.pose.Pose()
     ligand = fuzzball_pose.residue(1).clone()
     motif_pose.append_residue_by_bond(ligand)
-    for residue_index in fuzzball_defined_residues:
-        defined_residue = fuzzball_pose.residue(residue_index)
-        current_jump = motif_pose.size()
-        motif_pose.append_residue_by_jump(defined_residue, current_jump)
+
+    if include_defined:
+        for residue_index in fuzzball_defined_residues:
+            defined_residue = fuzzball_pose.residue(residue_index)
+            current_jump = motif_pose.size()
+            motif_pose.append_residue_by_jump(defined_residue, current_jump)
+
+        print(f'Initiated initial motif with defined residues {" ".join([str(a) for a in fuzzball_defined_residues])}')
 
     defined_motif_size = motif_pose.size()
     defined_motif_resnums = [i for i in range(1, defined_motif_size + 1)]
@@ -88,7 +93,6 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     motif_residues_to_init = motif_size - defined_motif_size
     current_residues_in_fuzzball = dict()  # {motif_position: fuzzball_motif_index}
 
-    print(f'Initiated initial motif with defined residues {" ".join([str(a) for a in fuzzball_defined_residues])}')
 
     def get_new_residue(current_residues_in_fuzzball):
         residue_from_fuzzball = int(random.randint(motif_pose.size() + 1, fuzzball_size))
@@ -115,8 +119,12 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     bsff_sfxn(fuzzball_pose)
     e_edge = fuzzball_pose.energies().energy_graph()
 
-    for residue in range(defined_motif_size, fuzzball_pose.size() + 1):
+    for residue in range(2 + defined_motif_size, fuzzball_pose.size() + 1):
         get_energy_edge = e_edge.find_energy_edge(1, residue)
+
+        if get_energy_edge is None:
+            continue
+
         current_edge = get_energy_edge.fill_energy_map()
         hbond_sc = current_edge.get(rosetta.core.scoring.hbond_sc)
         if hbond_sc is not None and hbond_sc < 0:
@@ -129,7 +137,7 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     # Set up infrastructure
     solution_list = list()
     solution_set = set()
-    temperatures = [1.5, 1.2, 0.9, 0.6, 0.3]
+    temperatures = [10, 5, 1.5, 1.2, 0.9, 0.6, 0.3]
 
     for kT in temperatures:
         print(f'Temperature: {kT}')
@@ -155,7 +163,10 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
                 new_solution_indicies = tuple(sorted(current_residues_in_fuzzball.values()))
                 if new_solution_indicies not in solution_set:
                     solution_set.add(new_solution_indicies)
-                    solution_list.append({'Residue_indicies': [1] + list(new_solution_indicies) + fuzzball_defined_residues,
+                    residue_indices_cell = [1] + list(new_solution_indicies)
+                    if include_defined:
+                        residue_indices_cell += fuzzball_defined_residues
+                    solution_list.append({'Residue_indicies': residue_indices_cell,
                                           'Obj_score': mc.last_accepted_score(),
                                           })
 
