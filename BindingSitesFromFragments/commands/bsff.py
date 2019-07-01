@@ -67,8 +67,8 @@ def main():
 
     #todo: implement
     if argv[0] == 'cluster':
-        from .bsff_align import align
-        align(docopt(align.__doc__, argv=argv))
+        from .bsff_cluster import clustering
+        clustering(docopt(clustering.__doc__, argv=argv))
 
     if argv[0] == 'assemble':
         from .bsff_assemble import assemble
