@@ -21,9 +21,7 @@ from rdkit.Chem import rdFMCS
 from rdkit.Chem.Fingerprints import FingerprintMols
 
 from .utils import *
-
-# --- Silence ProDy --- #
-prody.confProDy(verbosity='none')
+from .motifs import Generate_Constraints
 
 class Align_PDB_Factory(object):
     """
@@ -32,6 +30,9 @@ class Align_PDB_Factory(object):
     """
 
     def __init__(self, user_defined_dir):
+
+        # --- Silence ProDy --- #
+        prody.confProDy(verbosity='none')
 
         # --- Paths --- #
         self.user_defined_dir = user_defined_dir
@@ -48,7 +49,7 @@ class Align_PDB_Factory(object):
         self.sanitized_smiles_dict = {f"Fragment_{row['Fragment']}": re.sub(r'[^\[\]]+(?=\])', lambda x: f"{x.group().split(';')[0]}",
                                                                             row['SMILES_fragment']).upper() for index, row in self.fragment_df.iterrows()}
 
-    def alignment_monstrosity(self, rmsd_cutoff=0.5, use_cluster_pdb_database=False):
+    def alignment_monstrosity(self, rmsd_cutoff=0.5, use_local_pdb_database=False):
         """
         Consequences of not thinking ahead...
         For each fragment, align all fragment-containing ligands to fragment
@@ -57,9 +58,9 @@ class Align_PDB_Factory(object):
         :param rmsd_cutoff: fragment alignment RMSD cutoff, anything higher gets rejected
         :return:
         """
-        # If use_cluster_pdb_database=False, use PDB FTP to download all structures
-        # Otherwise, all relevant structures should be found in the local PDB database on Netapp
-        if not use_cluster_pdb_database:
+        # If use_local_pdb_database=False, use PDB FTP to download all structures
+        # Otherwise, all relevant structures should be found in the local PDB database
+        if not use_local_pdb_database:
             prody.pathPDBFolder(folder=self.pdb_bank_dir)
 
             for current_fragment in self.pdb_ligand_json:
@@ -79,7 +80,8 @@ class Align_PDB_Factory(object):
         rejected_list = self.load_previously_rejected_pdbs(processed_PDBs_path)
 
         # Create directories...
-        os.makedirs(self.pdb_bank_dir, exist_ok=True)
+        if not use_local_pdb_database:
+            os.makedirs(self.pdb_bank_dir, exist_ok=True)
         os.makedirs(processed_PDBs_path, exist_ok=True)
 
         # Fragment_1, Fragment_2, ...
@@ -101,7 +103,7 @@ class Align_PDB_Factory(object):
             for pdbid in self.pdb_ligand_json[current_fragment]['PDBs']:
 
                 # Return path of PDB file to use for processing
-                found_pdb, pdb_path = self.return_PDB_to_use_for_alignments(pdbid, self.pdb_bank_dir, use_cluster_pdb_database=False)
+                found_pdb, pdb_path = self.return_PDB_to_use_for_alignments(pdbid, use_local_pdb_database=use_local_pdb_database)
 
                 if not found_pdb:
                     continue
@@ -184,7 +186,7 @@ class Align_PDB_Factory(object):
                                     transformed_pdb = align.apply_transformation(pdb_path, ligand_resnum, target_fragment_atom_serials, transformation_matrix)
 
                                     # Continue if transformed_pdb - ligand is None
-                                    if transformed_pdb.select(f'not {ligand_resname}') is None:
+                                    if transformed_pdb.select(f'not (resname {ligand_resname})') is None:
                                         continue
 
                                     transformed_pdb_name = f'{pdbid}_{ligand_resname}_{ligand_chain}_{ligand_resnum}-{count}.pdb'
@@ -214,7 +216,7 @@ class Align_PDB_Factory(object):
             with open(exclude_txt, 'r') as exlude_ligands:
                 return set([lig.strip() for lig in exlude_ligands])
         else:
-            return None
+            return set()
 
     def _init_pubchem_search_results(self):
         """
@@ -240,32 +242,30 @@ class Align_PDB_Factory(object):
         else:
             return list()
 
-    def return_PDB_to_use_for_alignments(self, pdbid, pdb_bank_dir, use_cluster_pdb_database=False):
+    def return_PDB_to_use_for_alignments(self, pdbid, use_local_pdb_database=False):
         """
         Returns the path of the PDB to use for alignment processing.
 
         :param pdbid: 4-character PDB identifier code
         :param pdb_bank_dir: directory to dump pdb.gz files
-        :param use_cluster_pdb_database: if True, use the local PDB database on the cluster
+        :param use_local_pdb_database: if True, use the local PDB database on the cluster
         :return:
         """
         # --- Download PDB via RCSB FTP or find locally --- #
-        if f'{pdbid}.pdb.gz' in os.listdir(pdb_bank_dir):
+        if use_local_pdb_database:
 
-            pdb_path = os.path.join(pdb_bank_dir, f'{pdbid}.pdb.gz')
-            return True, pdb_path
-
-        elif use_cluster_pdb_database:
-
-            pdb_path = f'/netapp/database/pdb/remediated/pdb/{pdbid[1:-1]}/pdb{pdbid}.ent.gz'
+            pdb_path = os.path.join(use_local_pdb_database, f'{pdbid[1:-1]}/pdb{pdbid}.ent.gz')
             pdb_path_exists = os.path.exists(pdb_path)
-
-            print(f'Path on netapp: {pdb_path}\nExists: {pdb_path_exists}')
 
             if pdb_path_exists:
                 return True, pdb_path
             else:
                 return False, None
+
+        elif f'{pdbid}.pdb.gz' in os.listdir(self.pdb_bank_dir):
+
+            pdb_path = os.path.join(self.pdb_bank_dir, f'{pdbid}.pdb.gz')
+            return True, pdb_path
 
         else:
 
@@ -462,7 +462,7 @@ class Align_PDB(object):
         ligand_ideal = Chem.MolFromSmiles(target_ligand_ideal_smiles)
         ligand_pdb = Chem.MolFromPDBBlock(target_ligand_pdb_string.getvalue(), removeHs=False)
 
-        if ligand_pdb is None:
+        if ligand_pdb is None or ligand_ideal is None:
             print('\nUnable to load ligand PDB as an RDKit mol object...\n')
             return False, None
 
@@ -567,10 +567,12 @@ class Align_PDB(object):
         if os.path.exists(self.frag_inputs_dir) and self.frag_rigid_pdb_name in os.listdir(self.frag_inputs_dir):
             print('* Using defined rigid atoms for alignment *')
             frag_atom_rigid, trgt_atom_rigid = self.return_rigid_atoms(frag_atom_coords, trgt_atom_coords)
-            return (trgt_atom_rigid, target_fragment_atom_serials), frag_atom_rigid, prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
+            # return (trgt_atom_rigid, target_fragment_atom_serials), frag_atom_rigid, prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
+            return (trgt_atom_rigid, target_fragment_atom_serials), frag_atom_rigid, Generate_Constraints.calculate_transformation_matrix(trgt_atom_rigid, frag_atom_rigid)
 
         else:
-            return (trgt_atom_coords, target_fragment_atom_serials), frag_atom_coords, prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
+            # return (trgt_atom_coords, target_fragment_atom_serials), frag_atom_coords, prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
+            return (trgt_atom_coords, target_fragment_atom_serials), frag_atom_coords, Generate_Constraints.calculate_transformation_matrix(trgt_atom_coords, frag_atom_coords)
 
     def return_rigid_atoms(self, frag_atom_coords, trgt_atom_coords):
         """
@@ -659,7 +661,13 @@ class Ideal_Ligand_PDB_Container(object):
         Get Ligand information from the PDB (SMILES strings specifically)
         Note: you can also parse .cif representation of ligand to find SMILES {http://files.rcsb.org/ligands/view/{ligand_ID}.cif}
         """
-        pdb_ligand_dict = prody.fetchPDBLigand(self.resname)
+        pdb_ligand_dict = dict()
+
+        try:
+            pdb_ligand_dict = prody.fetchPDBLigand(self.resname)
+        except Exception as e:
+            print(e)
+            self.success = False
 
         # Set ideal ligand prody
         if pdb_ligand_dict.get('ideal', f'Ideal ligand representation for {self.resname} was not found!'):
