@@ -33,12 +33,12 @@ def new_project(args):
     Usage: bsff new <chemical_id>
 
     """
-    print('Starting a new project for {}'.format(args['<compound_name>']))
-    project_root_dir = os.path.join(os.getcwd(), args['<compound_name>'])
+    print('Starting a new project for {}'.format(args['<chemical_id>']))
+    project_root_dir = os.path.join(os.getcwd(), args['<chemical_id>'])
     os.makedirs(project_root_dir)
     os.makedirs(os.path.join(project_root_dir, 'Inputs'))
     os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Rosetta_Inputs'))
     os.makedirs(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs'))
     os.makedirs(os.path.join(project_root_dir, 'Inputs', 'User_Inputs'))
     with open(os.path.join(project_root_dir, 'Inputs', 'Fragment_Inputs', 'Fragment_inputs.csv'), 'w') as fragment_inputs:
-        fragment_inputs.write('Fragment, SMILES_fragment')
+        fragment_inputs.write('Fragment,SMILES_fragment')
