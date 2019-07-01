@@ -32,7 +32,7 @@ def fuzzball_contact_recovery_bm(args):
     Usage:
       bsff benchmark fuzzball_contact_recovery <user_defined_dir> <match_dir> <fuzzball_dir> [options]
 
-    Arguements:
+    Arguments:
       <user_defined_dir>      Path to project root directory
       <match_dir>             Directory containing matches to benchmark
       <fuzzball_dir>          Directory containing fuzzballs for current match set
