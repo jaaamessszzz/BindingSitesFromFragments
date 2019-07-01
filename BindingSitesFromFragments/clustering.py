@@ -2,6 +2,7 @@
 
 import os
 import sys
+import pickle
 from pprint import pprint
 
 import prody
@@ -34,15 +35,24 @@ class Cluster(object):
         """
         processsed_residue_list = []
         for pdb in pdb_check(self.processed_PDBs_dir):
-            pdb_info = os.path.basename(os.path.normpath(pdb))
 
-            # Check that residues exist within cutoff distance provided in alignments, otherwise pass
-            prody_protein_selection = prody_protein.select('protein and not hetatm')
-            if prody_protein_selection == None:
+            # Make sure I can load things...
+            try:
+
+                prody_protein = prody.parsePDB(pdb)
+
+                # Check that residues exist within cutoff distance provided in alignments, otherwise pass
+                prody_protein_selection = prody_protein.select('protein and not hetatm')
+                if prody_protein_selection == None:
+                    continue
+                else:
+                    prody_protein_hv = prody_protein_selection.getHierView()
+
+            except Exception as e:
+                print(e)
                 continue
-            else:
-                prody_protein_hv = prody_protein_selection.getHierView()
 
+            pdb_info = os.path.basename(os.path.normpath(pdb))
             prody_ligand = prody.parsePDB(pdb).select('hetatm and resname {}'.format(pdb_info.split('_')[1]))
 
             # Iterate over residues in contacts and generate representative vector with weights applied
@@ -64,13 +74,15 @@ class Cluster(object):
         self.distance_cutoff = 2**0.5
         self.clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
 
-    def generate_output_directories(self, base_dir, fragment_path, consolidate_clusters=True):
+    def generate_output_directories(self, base_dir, fragment_path, consolidate_clusters=True, output_source_pdb_info=True):
 
         residue_cluster_pairs = [(cluster, residue) for cluster, residue in zip(self.clusters, self.pdb_object_list)]
-        fragment = os.path.basename(os.path.normpath(fragment_path))
+        fragment_basepath, fragment = os.path.split(os.path.normpath(fragment_path))
         fragment_number = fragment.split('_')[1]
 
         dict_list = []
+        if output_source_pdb_info:
+            source_pdb_dict = dict()
 
         for cluster in set(self.clusters):
             # todo: add option to output clusters as PDB alongside ag.npz files
@@ -84,6 +96,11 @@ class Cluster(object):
             # Generate report on cluster qualities
             dict_list.append(self.generate_report_row(residue_list, cluster))
 
+            # Add PDB sources to source_pdb_dict
+            cluster_source_list = [res[1].pdb_info.split(".")[0].split('_')[0] for res in residue_list]
+            cluster_source_set = list(set(cluster_source_list))
+            source_pdb_dict[cluster] = {'set': cluster_source_set, 'list': cluster_source_list}
+
             # Output residue PDBs for each cluster
             if consolidate_clusters:
 
@@ -94,9 +111,12 @@ class Cluster(object):
                     :param res: Fragment_PDB() container instance
                     """
                     residue_atomgroup = res.prody_residue.copy()
-                    residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{res.pdb_info.split(".")[0]}'
+                    contact_source_filename = res.pdb_info.split(".")[0]
+                    contact_source_pdbid = contact_source_filename.split('_')[0]
+                    residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{contact_source_filename}'
 
                     residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
+                    residue_atomgroup.setData('source_PDB', [contact_source_pdbid for atom in residue_atomgroup])
                     residue_atomgroup.setData('cluster', [int(cluster) for atom in residue_atomgroup])
                     residue_atomgroup.setData('fragment_id', [int(fragment_number) for atom in residue_atomgroup])
 
@@ -126,6 +146,10 @@ class Cluster(object):
                                                                                      residue[1].pdb_info)
                                                     ),
                                        residue[1].prody_residue)
+
+        if output_source_pdb_info:
+            with open(os.path.join(fragment_cluster_path, f'{fragment}-PDB_Sources.pickle'), 'wb') as pdb_sources:
+                pickle.dump(source_pdb_dict, pdb_sources)
 
         # Export .csv
         self.df = pd.DataFrame(dict_list)
