@@ -3,11 +3,14 @@
 import os
 import sys
 import pickle
+import operator
+import itertools
 from pprint import pprint
 
 import prody
 import numpy as np
 import pandas as pd
+from scipy.spatial.distance import pdist
 from scipy.cluster.hierarchy import linkage, fcluster
 
 from .utils import *
@@ -23,7 +26,8 @@ class Cluster(object):
     def __init__(self, processed_PDBs_dir):
         self.processed_PDBs_dir = processed_PDBs_dir
         self.pdb_object_list = self._import_pdbs()
-        self.clusters = None
+        self.distance_cutoff = 1 - np.cos(30 * np.pi / 180)  # Maximum of 30 degree deviation between contacts within a cluster
+        self.clusters = dict()
         self.df = None
 
     def _import_pdbs(self):
@@ -58,94 +62,164 @@ class Cluster(object):
             # Iterate over residues in contacts and generate representative vector with weights applied
             processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand,) for residue in prody_protein_hv.iterResidues()]
 
-        processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.vector is not None]
+        processsed_residue_list_cleaned = [residue for residue in processsed_residue_list if residue.viable is not None]
+        print(f'Unique processed and viable residues: {len(processsed_residue_list_cleaned)}')
 
         return processsed_residue_list_cleaned
 
     def cluster_scipy(self, display_dendrogram=False):
         """
-        Using Hierarchical clustering through scipy to identify representative contacts. 
+        Using Hierarchical clustering through scipy to identify representative contacts.
+
+        Clustering is separated into two steps since hierarchical clustering is an O(n^2) thing and blows up my RAM when
+        clustering relatively common fragments... First, residues are separated based on categorical variables into a
+        dict... think of it as clustering by hamming distance with a distance cutoff of one. Each of these groups are
+        then clustered by cosine distance to group residues in space around the fragment.
+
         :return: 
         self.clusters: list of indicies corresponding to cluster numbers for each element in self.pdb_object_list
         """
-        vector_array = np.asarray([thingy.vector for thingy in self.pdb_object_list])
-        Z = linkage(vector_array, 'ward')
 
-        self.distance_cutoff = 2**0.5
-        self.clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
+        category_dict = dict()
+        unique_category_list = list()
+
+        for residue in self.pdb_object_list:
+            cat_array_string = residue.categorical_array.tostring()
+
+            if cat_array_string in category_dict.keys():
+                category_dict[cat_array_string].append(residue)
+            else:
+                category_dict[cat_array_string] = [residue]
+                unique_category_list.append(np.copy(residue.categorical_array))
+
+        # CLUSTER BY CATEGORIES FIRST!!! ALLOW HAMMING DIST OF  1
+        hamming_distance = pdist(unique_category_list, metric='hamming')  # Hamming distance normalized to vector length!
+        cat_Z = linkage(hamming_distance, method='complete')
+        cat_clusters = fcluster(cat_Z, 2/14, criterion='distance')
+        mapped_categories = [(cluster, category) for cluster, category in zip(cat_clusters, unique_category_list)]
+
+        pprint(mapped_categories)
+
+        # Combine lists from category_dict into category-level clusters
+        clustered_category_dict = dict()
+        for cluster, category_vector in mapped_categories:
+
+            print(cluster, category_vector, len(category_dict[category_vector.tostring()]))
+            if cluster not in clustered_category_dict.keys():
+                clustered_category_dict[cluster] = list()
+            clustered_category_dict[cluster] = clustered_category_dict[cluster] + category_dict[category_vector.tostring()]
+
+        pprint([(key, len(asdf)) for key, asdf in clustered_category_dict.items()])
+
+        # Cluster spatial positions for categorically clustered residues
+        for category, category_contacts in clustered_category_dict.items():
+            vector_array = [residue.contact_vector for residue in category_contacts]
+
+            print(f'Clustering {category} with {len(vector_array)} residue')
+
+            if len(vector_array) > 1:
+                cosine_distances = pdist(np.asarray(vector_array), metric='cosine')
+
+                pprint(cosine_distances)
+
+                Z = linkage(cosine_distances, method='ward')
+                clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
+                self.clusters[category] = [(cluster, residue) for cluster, residue in zip(clusters, category_contacts)]
+
+            # Handle singleton clusters by hand
+            else:
+                self.clusters[category] = [(0, category_contacts[0])]
 
     def generate_output_directories(self, base_dir, fragment_path, consolidate_clusters=True, output_source_pdb_info=True):
+        """
 
-        residue_cluster_pairs = [(cluster, residue) for cluster, residue in zip(self.clusters, self.pdb_object_list)]
+
+        :param base_dir:
+        :param fragment_path:
+        :param consolidate_clusters:
+        :param output_source_pdb_info:
+        :return:
+        """
         fragment_basepath, fragment = os.path.split(os.path.normpath(fragment_path))
         fragment_number = fragment.split('_')[1]
+
+        # Generate list of fragment_PDB objects containing all relevant information on residue-ligand contacts in a cluster
+        fragment_cluster_path = os.path.join(base_dir, 'Cluster_Results', fragment)
+        os.makedirs(fragment_cluster_path, exist_ok=True)
 
         dict_list = []
         if output_source_pdb_info:
             source_pdb_dict = dict()
 
-        for cluster in set(self.clusters):
-            # todo: add option to output clusters as PDB alongside ag.npz files
+        for cluster_count, (category, cluster_annotated_residues) in enumerate(self.clusters.items(), start=1):
 
-            # Generate list of fragment_PDB objects containing all relevant information on residue-ligand contacts in a cluster
-            residue_list = [pair for pair in residue_cluster_pairs if pair[0] == cluster]
-            fragment_cluster_path = os.path.join(base_dir, 'Cluster_Results', fragment)
+            source_pdb_dict[cluster_count] = dict()
 
-            os.makedirs(fragment_cluster_path, exist_ok=True)
+            # todo: somehow separate annoted residue tuples into cluster lists
+            # https://stackoverflow.com/questions/8092877/split-a-list-of-tuples-into-sub-lists-of-the-same-tuple-field
+            cluster_annotated_residues_sorted = sorted(cluster_annotated_residues, key=operator.itemgetter(0))
 
-            # Generate report on cluster qualities
-            dict_list.append(self.generate_report_row(residue_list, cluster))
+            for cluster, cluster_residues in itertools.groupby(cluster_annotated_residues_sorted, operator.itemgetter(0)):
 
-            # Add PDB sources to source_pdb_dict
-            cluster_source_list = [res[1].pdb_info.split(".")[0].split('_')[0] for res in residue_list]
-            cluster_source_set = list(set(cluster_source_list))
-            source_pdb_dict[cluster] = {'set': cluster_source_set, 'list': cluster_source_list}
+                # todo: simplify this jankiness
+                cluster_residues = list(cluster_residues)
+                print(cluster_residues)
 
-            # Output residue PDBs for each cluster
-            if consolidate_clusters:
+                # Generate report on cluster qualities
+                dict_list.append(self.generate_report_row(cluster_residues, cluster))
 
-                def tag_residue(cluster, res, index=2):
-                    """"
-                    Tag residue CA with source PDB string
-                    :param cluster: cluster index
-                    :param res: Fragment_PDB() container instance
-                    """
-                    residue_atomgroup = res.prody_residue.copy()
-                    contact_source_filename = res.pdb_info.split(".")[0]
-                    contact_source_pdbid = contact_source_filename.split('_')[0]
-                    residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{contact_source_filename}'
+                # Add PDB sources to source_pdb_dict
+                cluster_source_list = [res[1].pdb_info.split(".")[0].split('_')[0] for res in cluster_residues]
+                cluster_source_set = list(set(cluster_source_list))
+                source_pdb_dict[cluster_count][cluster] = {'set': cluster_source_set, 'list': cluster_source_list}
 
-                    residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
-                    residue_atomgroup.setData('source_PDB', [contact_source_pdbid for atom in residue_atomgroup])
-                    residue_atomgroup.setData('cluster', [int(cluster) for atom in residue_atomgroup])
-                    residue_atomgroup.setData('fragment_id', [int(fragment_number) for atom in residue_atomgroup])
+                # Output residue PDBs for each cluster
+                # todo: add option to output clusters as PDB alongside ag.npz files
+                if consolidate_clusters:
 
-                    residue_atomgroup.setResnums([index] * len(residue_atomgroup))
-                    residue_atomgroup.setChids(['A'] * len(residue_atomgroup))
+                    def tag_residue(cluster, res, index=2):
+                        """"
+                        Tag residue CA with source PDB string
+                        :param cluster: cluster index
+                        :param res: Fragment_PDB() container instance
+                        """
+                        residue_atomgroup = res.prody_residue.copy()
+                        contact_source_filename = res.pdb_info.split(".")[0]
+                        contact_source_pdbid = contact_source_filename.split('_')[0]
+                        residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{contact_source_filename}'
 
-                    return residue_atomgroup
+                        residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
+                        residue_atomgroup.setData('source_PDB', [contact_source_pdbid for atom in residue_atomgroup])
+                        residue_atomgroup.setData('cluster', [f'{cluster_count}-{cluster}' for atom in residue_atomgroup])
+                        residue_atomgroup.setData('fragment_id', [int(fragment_number) for atom in residue_atomgroup])
 
-                # Start cluster_ensemble using first element... it seems you can't add residues to an empty AtomGroup
-                cluster_ensemble = tag_residue(*residue_list[0])
+                        residue_atomgroup.setResnums([index] * len(residue_atomgroup))
+                        residue_atomgroup.setChids(['A'] * len(residue_atomgroup))
 
-                for index, (cluster_number, residue_container) in enumerate(residue_list[1:], start=3):
-                    cluster_ensemble = cluster_ensemble + tag_residue(cluster_number, residue_container, index=index)
+                        return residue_atomgroup
 
-                prody.saveAtoms(cluster_ensemble, filename=os.path.join(fragment_cluster_path, f'Cluster_{cluster}'))
+                    # Start cluster_ensemble using first element... it seems you can't add residues to an empty AtomGroup
+                    # todo: simplify this jankiness
+                    cluster_ensemble = tag_residue(*list(cluster_residues)[0])
 
-            else:
-                for index, residue in enumerate(residue_list):
-                    if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
-                                                                     'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
-                                                                     'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
-                                                                     'THR', 'VAL', 'TRP', 'TYR']:
-                        prody.writePDB(os.path.join(fragment_cluster_path,
-                                                    'Cluster_{0}-{1}_{2}-{3}'.format(cluster,
-                                                                                     residue[1].prody_residue.getResnames()[0],
-                                                                                     str(index),
-                                                                                     residue[1].pdb_info)
-                                                    ),
-                                       residue[1].prody_residue)
+                    for index, (cluster_number, residue_container) in enumerate(cluster_residues[1:], start=3):
+                        cluster_ensemble = cluster_ensemble + tag_residue(cluster_number, residue_container, index=index)
+
+                    prody.saveAtoms(cluster_ensemble, filename=os.path.join(fragment_cluster_path, f'Cluster_{cluster_count}_{cluster}'))
+
+                    # Write pdb
+                    prody.writePDB(os.path.join(fragment_cluster_path, f'Cluster_{cluster_count}_{cluster}'), cluster_ensemble)
+
+                else:
+                    for index, residue in enumerate(cluster_residues):
+                        if residue[1].prody_residue.getResnames()[0] in ['ALA', 'CYS', 'SEC', 'ASP', 'GLU', 'PHE',
+                                                                         'GLY', 'HIS', 'ILE', 'LYS', 'LEU', 'MET',
+                                                                         'MSE', 'ASN', 'PRO', 'GLN', 'ARG', 'SER',
+                                                                         'THR', 'VAL', 'TRP', 'TYR']:
+                            prody.writePDB(os.path.join(fragment_cluster_path,
+                                                        f'Cluster_{cluster_count}_{cluster}-{residue[1].prody_residue.getResnames()[0]}_{index}-{residue[1].pdb_info}'
+                                                        ),
+                                           residue[1].prody_residue)
 
         if output_source_pdb_info:
             with open(os.path.join(fragment_cluster_path, f'{fragment}-PDB_Sources.pickle'), 'wb') as pdb_sources:
@@ -236,9 +310,11 @@ class fragment_PDB(object):
     def __init__(self, prody_residue, pdb_info, prody_ligand):
         self.pdb_info = pdb_info
         self.prody_residue = prody_residue
-        self.vector = self.process_residue_into_vector(prody_ligand, prody_residue)
+        self.categorical_array = None
+        self.contact_vector = None
+        self.viable = self.process_residue_into_vector(prody_ligand, prody_residue)
 
-    def process_residue_into_vector(self, prody_ligand, prody_residue, distance_cutoff=4):
+    def process_residue_into_vector(self, prody_ligand, prody_residue, distance_cutoff_polar=3.5, distance_cutoff_greasy=4):
         """
         Converting each residue into a representative vector
 
@@ -252,11 +328,10 @@ class fragment_PDB(object):
             * Vector from fragment centroid to {residue centroid | closest residue atom }
         * Backbone or side chain
         
-         {Angstroms} - X component, unit vector from fragment centroid to closest residue atom 
-         {Angstroms} - Y component, unit vector from fragment centroid to closest residue atom 
-         {Angstroms} - Z component, unit vector from fragment centroid to closest residue atom
-         
-         {Angstroms} - Normalized contact distance  
+         {Angstroms} - X component, vector from fragment centroid to closest residue atom
+         {Angstroms} - Y component, vector from fragment centroid to closest residue atom
+         {Angstroms} - Z component, vector from fragment centroid to closest residue atom
+
          { 0 | 1 }   - Backbone contact OR Sidechain contact
          { 0 | 1 }   - Ligand Polar Contact OR Ligand Non-polar Contact
          
@@ -279,9 +354,6 @@ class fragment_PDB(object):
         min_contact_distance, row_index_low, column_index_low = minimum_contact_distance(prody_residue, prody_ligand, return_indices=True)
         polar_residues = ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'ARG', 'SER', 'THR', 'TYR']
 
-        distance_cutoff_polar = 3.5
-        distance_cutoff_greasy = 4
-
         if all([prody_residue.getResnames()[0] in polar_residues, min_contact_distance > distance_cutoff_polar]):
             return None
 
@@ -303,15 +375,18 @@ class fragment_PDB(object):
 
             # Vector from fragment centroid to closest residue atom
             contact_vector = (residue_contact_atom.getCoords() - prody.calcCenter(prody_ligand))[0]
-            contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
+            # contact_unit_vector = contact_vector / np.linalg.norm(contact_vector)
 
             # Side chain has hydrogen bond donor/acceptor (DEHKNQRSTY)
             h_bond_donor_acceptor = 1 if residue_contact_atom.getResnames()[0] in polar_residues else 0
 
+            # Polar atom on residue is contacting ligand
+            residue_polar_contact = 1 if residue_contact_atom.getNames()[0][0] in ['O', 'N'] else 0
+
             # Residue characteristics
             # todo: UPDATE so that only one of the below can hold value of 1 at any given time
-            # {0 | 1} - Hydrophobic, aliphatic(AILV)
-            greasy_ali = 1 if residue_contact_atom.getResnames()[0] in ['ALA', 'ILE', 'LEU', 'VAL'] else 0
+            # {0 | 1} - Hydrophobic, aliphatic(AILVC)
+            greasy_ali = 1 if residue_contact_atom.getResnames()[0] in ['ALA', 'ILE', 'LEU', 'VAL', 'CYS'] else 0
             # {0 | 1} - Hydrophobic, aromatic(FWY)
             greasy_aro = 1 if residue_contact_atom.getResnames()[0] in ['PHE', 'TYR', 'TRP'] else 0
             # {0 | 1} - Polar(NCQMST)
@@ -331,14 +406,11 @@ class fragment_PDB(object):
             # {0 | 1} - Backbone C / CA
             bb_c_ca = 1 if residue_contact_atom.getNames()[0] in ['C', 'CA'] else 0
 
-            residue_vector = [
-                contact_unit_vector[0],
-                contact_unit_vector[1],
-                contact_unit_vector[2],
-                (min_contact_distance / distance_cutoff),
+            categorical_vector = [
                 residue_contact_type,
                 ligand_contact_type,
                 h_bond_donor_acceptor,
+                residue_polar_contact,
                 greasy_ali,
                 greasy_aro,
                 polar,
@@ -351,4 +423,7 @@ class fragment_PDB(object):
                 bb_c_ca
             ]
 
-            return np.asarray(residue_vector)
+            self.categorical_array = np.asanyarray(categorical_vector)
+            self.contact_vector = contact_vector
+
+            return True
