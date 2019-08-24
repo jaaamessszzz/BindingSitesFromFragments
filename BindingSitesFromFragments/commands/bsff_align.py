@@ -17,15 +17,18 @@ def align(args):
       <user_defined_dir>      Path to project root directory
 
     Options:
-      --use_local_pdb_database=<path_to_database>, -d=<path_to_database>    Path to root pdb/ directory of local copy of PDB
-
+      -d=<path_to_database>, --use_local_pdb_database=<path_to_database>        Path to root pdb/ directory of local copy of PDB
+      -s, --skip_substruture_verification                                       Don't check that mapped substructures have same connectivity as fragment in source ligand
     """
     working_directory = args['<user_defined_dir>']
     use_local_pdb_database = args['--use_local_pdb_database']
+    verify_substructure = not args['--skip_substruture_verification']
+
+    print(verify_substructure)
 
     # Verify local database exists
     if use_local_pdb_database and not os.path.exists(use_local_pdb_database):
         raise Exception(f'Local PDB root directory {use_local_pdb_database} does not exist!')
 
     perform_alignments = Align_PDB_Factory(working_directory)
-    perform_alignments.alignment_monstrosity(use_local_pdb_database=use_local_pdb_database)
+    perform_alignments.alignment_monstrosity(use_local_pdb_database=use_local_pdb_database, verify_substructure=verify_substructure)

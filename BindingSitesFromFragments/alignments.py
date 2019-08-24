@@ -5,6 +5,7 @@ import io
 import re
 import sys
 import json
+import pickle
 from pprint import pprint
 
 import prody
@@ -38,7 +39,8 @@ class Align_PDB_Factory(object):
         self.user_defined_dir = user_defined_dir
         self.pdb_bank_dir = os.path.join(self.user_defined_dir, 'PDB_Bank')
         self.fragment_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')
-        self.rejected_list_path = None  # Assigned in load_previously_rejected_pdbs()
+        self.processed_PDBs_path = os.path.join(self.user_defined_dir, 'Transformed_Aligned_PDBs')
+        self.rejected_dict_pickle = os.path.join(self.processed_PDBs_path, 'Rejected_PDBs.pickle')
 
         # --- Load data from files --- #
         self.ligands_to_exclude = self._init_ligands_to_exclude()
@@ -49,7 +51,7 @@ class Align_PDB_Factory(object):
         self.sanitized_smiles_dict = {f"Fragment_{row['Fragment']}": re.sub(r'[^\[\]]+(?=\])', lambda x: f"{x.group().split(';')[0]}",
                                                                             row['SMILES_fragment']).upper() for index, row in self.fragment_df.iterrows()}
 
-    def alignment_monstrosity(self, rmsd_cutoff=0.5, use_local_pdb_database=False):
+    def alignment_monstrosity(self, rmsd_cutoff=0.5, use_local_pdb_database=False, verify_substructure=True):
         """
         Consequences of not thinking ahead...
         For each fragment, align all fragment-containing ligands to fragment
@@ -58,6 +60,16 @@ class Align_PDB_Factory(object):
         :param rmsd_cutoff: fragment alignment RMSD cutoff, anything higher gets rejected
         :return:
         """
+
+        # Create directory for processed PDBs
+        rejected_dict = self.load_previously_rejected_pdbs()
+        pprint(rejected_dict)
+
+        # Create directories...
+        if not use_local_pdb_database:
+            os.makedirs(self.pdb_bank_dir, exist_ok=True)
+        os.makedirs(self.processed_PDBs_path, exist_ok=True)
+
         # If use_local_pdb_database=False, use PDB FTP to download all structures
         # Otherwise, all relevant structures should be found in the local PDB database
         if not use_local_pdb_database:
@@ -75,21 +87,15 @@ class Align_PDB_Factory(object):
                 else:
                     print(f'All relevant PDBs for {current_fragment} found in {self.pdb_bank_dir}!\n')
 
-        # Create directory for processed PDBs
-        processed_PDBs_path = os.path.join(self.user_defined_dir, 'Transformed_Aligned_PDBs')
-        rejected_list = self.load_previously_rejected_pdbs(processed_PDBs_path)
-
-        # Create directories...
-        if not use_local_pdb_database:
-            os.makedirs(self.pdb_bank_dir, exist_ok=True)
-        os.makedirs(processed_PDBs_path, exist_ok=True)
-
         # Fragment_1, Fragment_2, ...
         for current_fragment in self.pdb_ligand_json:
 
             # Create directory for processed PDBs
-            processed_dir = os.path.join(processed_PDBs_path, current_fragment)
+            processed_dir = os.path.join(self.processed_PDBs_path, current_fragment)
             os.makedirs(processed_dir, exist_ok=True)
+
+            # Get list of already processed PDBs for current_fragment
+            already_processed_pdbs = [file[:4].upper() for file in os.listdir(processed_dir)]
 
             # Save ideal_ligand_containers for each fragment so things are only downloaded once
             ideal_ligand_dict = dict()
@@ -97,7 +103,7 @@ class Align_PDB_Factory(object):
             ideal_ligand_dict['Failed'] = list()
 
             # Align_PDB class holds all information for the current fragment
-            align = Align_PDB(self.user_defined_dir, current_fragment, self.sanitized_smiles_dict[current_fragment])
+            align = Align_PDB(self.user_defined_dir, current_fragment, self.sanitized_smiles_dict[current_fragment], verify_substructure=verify_substructure)
 
             # For each PDB containing a fragment-containing compound
             for pdbid in self.pdb_ligand_json[current_fragment]['PDBs']:
@@ -108,100 +114,116 @@ class Align_PDB_Factory(object):
                 if not found_pdb:
                     continue
 
+                if pdbid in already_processed_pdbs:
+                    continue
+
+                if current_fragment in rejected_dict.keys() and pdbid in rejected_dict[current_fragment]:
+                    continue
+
                 # Proceed with processing if the current PDB passes all filters
-                if not processed_check(processed_dir, pdbid, rejected_list):
-                    print("\n\nProcessing {}...".format(pdbid))
+                print("\n\nProcessing {}...".format(pdbid))
 
-                    # --- Check which ligands contain relevant fragments --- #
+                # --- Check which ligands contain relevant fragments --- #
 
-                    relevant_ligands = self.return_substructure_containing_ligands(pdb_path, self.pdb_ligand_json, current_fragment)
+                relevant_ligands = self.return_substructure_containing_ligands(pdb_path, self.pdb_ligand_json, current_fragment)
 
-                    # Set things up! Get ligands from Ligand Expo if haven't already tried and failed
-                    for ligand in relevant_ligands:
+                # Set things up! Get ligands from Ligand Expo if haven't already tried and failed
+                for ligand in relevant_ligands:
 
-                        if not ideal_ligand_dict['Ligands'].get(ligand) and ligand not in ideal_ligand_dict['Failed']:
-                            ideal_ligand_container = Ideal_Ligand_PDB_Container(ligand)
+                    if not ideal_ligand_dict['Ligands'].get(ligand) and ligand not in ideal_ligand_dict['Failed']:
+                        ideal_ligand_container = Ideal_Ligand_PDB_Container(ligand)
 
-                            if ideal_ligand_container.success:
-                                ideal_ligand_dict['Ligands'][ligand] = ideal_ligand_container
-                            else:
-                                ideal_ligand_dict['Failed'].append(ligand)
+                        if ideal_ligand_container.success:
+                            ideal_ligand_dict['Ligands'][ligand] = ideal_ligand_container
+                        else:
+                            ideal_ligand_dict['Failed'].append(ligand)
 
-                    # Create a temp list for ligands that will be pulled from the current PDB
-                    ligand_container_dict_for_current_pdb = {lig: ideal_ligand_dict['Ligands'][lig] for lig in ideal_ligand_dict['Ligands'] if lig in relevant_ligands}
-                    relevant_ligands_prody_dict = align.extract_ligand_records(pdb_path, ligand_container_dict_for_current_pdb)
+                # Create a temp list for ligands that will be pulled from the current PDB
+                ligand_container_dict_for_current_pdb = {lig: ideal_ligand_dict['Ligands'][lig] for lig in ideal_ligand_dict['Ligands'] if lig in relevant_ligands}
+                relevant_ligands_prody_dict = align.extract_ligand_records(pdb_path, ligand_container_dict_for_current_pdb)
 
-                    # Reject if no ligands with all atoms represented can be found for the given PDB
-                    if len(relevant_ligands_prody_dict) < 1:
-                        with open(self.rejected_list_path, 'a+') as reject_list:
-                            reject_list.write('{}\n'.format(pdbid))
-                        print('REJECTED - no target ligands were fully represented in the PDB')
-                        continue
-
-                    # --- Perform alignment of PDB fragment substructure (mobile) onto defined fragment (target) --- #
-
-                    # ...if PDB has not been processed, rejected, or excluded by the user
-
+                # Reject if no ligands with all atoms represented can be found for the given PDB
+                if len(relevant_ligands_prody_dict) < 1:
+                    if current_fragment in rejected_dict.keys():
+                        rejected_dict[current_fragment].append(pdbid)
                     else:
+                        rejected_dict[current_fragment] = [pdbid]
+                    print('REJECTED - no target ligands were fully represented in the PDB')
+                    continue
 
-                        # Iterate over ligands found to contain fragments as substructures
-                        for ligand_resname, ligand_chain, ligand_resnum in relevant_ligands_prody_dict:
+                # --- Perform alignment of PDB fragment substructure (mobile) onto defined fragment (target) --- #
 
-                            # Mapping of fragment atoms to target ligand atoms
-                            target_ligand_ideal_smiles = ligand_container_dict_for_current_pdb[ligand_resname].smiles
-
-                            # todo: catch ligands with missing SMILES strings earlier...
-                            if target_ligand_ideal_smiles is None:
-                                continue
-
-                            target_ligand_pdb_string = io.StringIO()
-                            target_ligand_prody = relevant_ligands_prody_dict[(ligand_resname, ligand_chain, ligand_resnum)].select('not hydrogen')
-                            prody.writePDBStream(target_ligand_pdb_string, target_ligand_prody)
-
-                            mapping_successful, fragment_target_map = align.fragment_target_mapping(target_ligand_ideal_smiles, target_ligand_pdb_string)
-
-                            if not mapping_successful:
-                                with open(self.rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
-                                print('REJECTED - failed atom mapping between target and reference fragment')
-                                continue
-
-                            print(f'\n{len(fragment_target_map)} possible mapping(s) of fragment onto {pdbid}:{ligand} found...\n')
-
-                            # Iterate over possible mappings of fragment onto current ligand
-                            rmsd_success = False
-                            for count, mapping in enumerate(fragment_target_map):
-
-                                # todo: refactor to use RDKit's atom.GetMonomerInfo() for atom selections...
-                                # Determine translation vector and rotation matrix
-                                target_coords_and_serials, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, target_ligand_prody)
-                                trgt_atom_coords, target_fragment_atom_serials = target_coords_and_serials
-
-                                # Apply transformation to protein_ligand complex if rmsd if below cutoff
-                                # todo: Use information from PubChem fragment SMILES in determining correct mappings
-                                rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
-                                print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
-
-                                if rmsd < rmsd_cutoff:
-                                    transformed_pdb = align.apply_transformation(pdb_path, ligand_resnum, target_fragment_atom_serials, transformation_matrix)
-
-                                    # Continue if transformed_pdb - ligand is None
-                                    if transformed_pdb.select(f'not (resname {ligand_resname})') is None:
-                                        continue
-
-                                    transformed_pdb_name = f'{pdbid}_{ligand_resname}_{ligand_chain}_{ligand_resnum}-{count}.pdb'
-                                    prody.writePDB(os.path.join(processed_dir, transformed_pdb_name), transformed_pdb)
-                                    rmsd_success = True
-
-                                else:
-                                    print('REJECTED - high RMSD upon alignment to reference fragment')
-
-                            if rmsd_success is False:
-                                with open(self.rejected_list_path, 'a+') as reject_list:
-                                    reject_list.write('{}\n'.format(pdbid))
+                # ...if PDB has not been processed, rejected, or excluded by the user
 
                 else:
-                    print('{} has been processed!'.format(pdbid))
+
+                    # Iterate over ligands found to contain fragments as substructures
+                    for ligand_resname, ligand_chain, ligand_resnum in relevant_ligands_prody_dict:
+
+                        # Mapping of fragment atoms to target ligand atoms
+                        target_ligand_ideal_smiles = ligand_container_dict_for_current_pdb[ligand_resname].smiles
+
+                        # todo: catch ligands with missing SMILES strings earlier...
+                        if target_ligand_ideal_smiles is None:
+                            continue
+
+                        target_ligand_pdb_string = io.StringIO()
+                        target_ligand_prody = relevant_ligands_prody_dict[(ligand_resname, ligand_chain, ligand_resnum)].select('not hydrogen')
+                        prody.writePDBStream(target_ligand_pdb_string, target_ligand_prody)
+
+                        mapping_successful, fragment_target_map = align.fragment_target_mapping(target_ligand_ideal_smiles, target_ligand_pdb_string)
+
+                        if not mapping_successful:
+                            if current_fragment in rejected_dict.keys():
+                                rejected_dict[current_fragment].append(pdbid)
+                            else:
+                                rejected_dict[current_fragment] = [pdbid]
+                            print('REJECTED - failed atom mapping between target and reference fragment')
+                            continue
+
+                        print(f'\n{len(fragment_target_map)} possible mapping(s) of fragment onto {pdbid}:{ligand} found...\n')
+
+                        # Iterate over possible mappings of fragment onto current ligand
+                        rmsd_success = False
+                        for count, mapping in enumerate(fragment_target_map):
+
+                            # todo: refactor to use RDKit's atom.GetMonomerInfo() for atom selections...
+                            # Determine translation vector and rotation matrix
+                            target_coords_and_serials, frag_atom_coords, transformation_matrix = align.determine_rotation_and_translation(mapping, target_ligand_prody)
+                            trgt_atom_coords, target_fragment_atom_serials = target_coords_and_serials
+
+                            # Apply transformation to protein_ligand complex if rmsd if below cutoff
+                            # Use information from PubChem fragment SMILES in determining correct mappings
+                            # Actually, map fragment onto source ligand and use valence information to determine correct mappings
+                            rmsd = prody.calcRMSD(frag_atom_coords, prody.applyTransformation(transformation_matrix, trgt_atom_coords))
+                            print('RMSD of target onto reference fragment:\t{}'.format(rmsd))
+
+                            if rmsd < rmsd_cutoff:
+                                transformed_pdb = align.apply_transformation(pdb_path, ligand_resnum, target_fragment_atom_serials, transformation_matrix)
+
+                                # Continue if transformed_pdb - ligand is None
+                                if transformed_pdb.select(f'not (resname {ligand_resname})') is None:
+                                    continue
+
+                                transformed_pdb_name = f'{pdbid}_{ligand_resname}_{ligand_chain}_{ligand_resnum}-{count}.pdb'
+                                prody.writePDB(os.path.join(processed_dir, transformed_pdb_name), transformed_pdb)
+                                rmsd_success = True
+
+                            else:
+                                print('REJECTED - high RMSD upon alignment to reference fragment')
+
+                        if rmsd_success is False:
+                            if current_fragment in rejected_dict.keys():
+                                rejected_dict[current_fragment].append(pdbid)
+                            else:
+                                rejected_dict[current_fragment] = [pdbid]
+
+            else:
+                print('{} has been processed!'.format(pdbid))
+
+        # Remember rejected PDBs
+        with open(self.rejected_dict_pickle, 'wb') as reject_pickle:
+            pickle.dump(rejected_dict, reject_pickle)
 
     # --- New methods after refactoring clusterfuck --- #
 
@@ -227,20 +249,19 @@ class Align_PDB_Factory(object):
         with open(os.path.join(self.user_defined_dir, 'PDB_search_results.json'), 'r') as jsonfile:
             return json.load(jsonfile)
 
-    def load_previously_rejected_pdbs(self, processed_PDBs_path):
+    def load_previously_rejected_pdbs(self):
         """
         Loads list of previously rejected pdb files
 
         :return:
         """
-        self.rejected_list_path = os.path.join(processed_PDBs_path, 'Rejected_PDBs.txt')
 
-        if os.path.exists(self.rejected_list_path):
-            with open(self.rejected_list_path, 'r') as rejected_PDBs:
-                return [pdb.strip() for pdb in rejected_PDBs]
+        if os.path.exists(self.rejected_dict_pickle):
+            with open(self.rejected_dict_pickle, 'rb') as rejected_PDBs:
+                return pickle.load(rejected_PDBs)
 
         else:
-            return list()
+            return dict()
 
     def return_PDB_to_use_for_alignments(self, pdbid, use_local_pdb_database=False):
         """
@@ -308,17 +329,19 @@ class Align_PDB(object):
     :param ligand_ResSeq_ID: Resnum for target ligand used for alignment
     :param target_fragment_atom_names: names of atoms in target fragment
     """
-    def __init__(self, user_defined_dir, current_fragment, fragment_smiles_sanitized):  # todo: fragment_string really shouldn't be a string...
+    def __init__(self, user_defined_dir, current_fragment, fragment_smiles_sanitized, verify_substructure=True):  # todo: fragment_string really shouldn't be a string...
 
         # --- Paths --- #
         self.current_fragment = current_fragment
         self.frag_rigid_pdb_name = f'{current_fragment}-rigid.pdb'
 
         self.user_defined_dir = user_defined_dir
-        self.fragment_inputs_path = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs')
+        self.inputs_dir = os.path.join(self.user_defined_dir, 'Inputs')
+        self.fragment_inputs_path = os.path.join(self.inputs_dir, 'Fragment_Inputs')
+        self.rosetta_inputs_path = os.path.join(self.inputs_dir, 'Rosetta_Inputs')
 
         # Select rigid atoms from fragment map for alignments if rigid atoms are defined in the Fragment_Inputs directory
-        self.frag_inputs_dir = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', 'Rigid_Fragment_Atoms')
+        self.frag_inputs_dir = os.path.join(self.fragment_inputs_path, 'Rigid_Fragment_Atoms')
 
         # --- Fragment-related variables --- #
 
@@ -330,6 +353,21 @@ class Align_PDB(object):
         # RDKit Mol representations of fragment
         self.fragment_ideal_rdkit_mol = Chem.MolFromSmiles(self.fragment_smiles_sanitized)
         self.fragment_pdb_rdkit_mol = Chem.MolFromPDBBlock(self.fragment_string, removeHs=False)
+
+        # --- Fragment Mapping options --- #
+        self.verify_substructure = verify_substructure
+        reference_ligand_heavyatom_neighbors_temp_ = dict()
+
+        if verify_substructure:
+            # Reference ligand RDKit Mol
+            reference_ligand_path = os.path.join(self.rosetta_inputs_path, f'{os.path.basename(user_defined_dir)[:3]}_0001.pdb')
+            reference_ligand_rdkit_mol = Chem.MolFromPDBFile(reference_ligand_path, removeHs=True)
+
+            for heavyatom in reference_ligand_rdkit_mol.GetAtoms():
+                heavyatom_name = heavyatom.GetMonomerInfo().GetName().strip()
+                reference_ligand_heavyatom_neighbors_temp_[heavyatom_name] = len(heavyatom.GetNeighbors())
+
+        self.reference_ligand_heavyatom_neighbors = reference_ligand_heavyatom_neighbors_temp_
 
         # Assert that mol objects were loaded properly
         assert not any([self.fragment_pdb_rdkit_mol is None, self.fragment_ideal_rdkit_mol is None])
@@ -436,7 +474,8 @@ class Align_PDB(object):
         self.fragment_string: String representation of user-defined fragment in PDB format
 
         target_ligand_pdb_string: String representation of the target ligand pulled from current PDB in PDB format. HYDROGENS REMOVED.
-
+        :param verify_substructure: if true, only use fragment mappings where all atoms in fragment have <= valence when
+        compared to mapped atoms in source reference ligand.
         :return: dict mapping fragment atoms to target atoms
         """
 
@@ -521,10 +560,38 @@ class Align_PDB(object):
         # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
         # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
 
-        # --- Map fragment atom index to target atom index --- #
-        fragment_target_map = [[(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
+        # todo: USE MAPPING TO GET VALENCE INFORMATION FROM TARGET LIGAND
+        # todo: REJECT MAPPINGS IF SUBSTRUCTURE VALENCES > FRAGMENT VALENCES
+        # Only add mappings to fragment_target_map if all atoms in substructure have <= atom neighbors as fragment in source molecule
+        if self.verify_substructure:
+            fragment_target_map = list()
+            for target_match in target_matches:
+                include_mapping = True
+                for f_idx, t_idx in zip(frag_matches, target_match):
 
-        return True, fragment_target_map
+                    # Get atom name from fragment match
+                    f_atomname = self.fragment_ideal_rdkit_mol.GetAtomWithIdx(f_idx).GetMonomerInfo().GetName().strip()
+
+                    # Find corresponding atom in reference conformer Mol...
+                    reference_neighborcount = self.reference_ligand_heavyatom_neighbors[f_atomname]
+                    target_neighborcount = len(ligand_ideal.GetAtomWithIdx(f_idx).GetNeighbors())
+
+                    # Assert number of atom neighbors for atom <= neighbors for mapped atom in target match
+                    if target_neighborcount > reference_neighborcount:
+                        include_mapping = False
+                        break
+
+                if include_mapping:
+                    fragment_target_map.append([(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)])
+
+        # --- Map fragment atom index to target atom index --- #
+        else:
+            fragment_target_map = [[(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
+
+        if len(fragment_target_map) > 0:
+            return True, fragment_target_map
+        else:
+            return False, None
 
     def process_atom_mappings_into_coordinate_sets(self, fragment_target_map, target_prody):
         """
@@ -537,16 +604,13 @@ class Align_PDB(object):
         fragment_atom_indices = [a[0] for a in fragment_target_map]
         target_atom_indices = [a[1] for a in fragment_target_map]
 
-        # todo: refactor this to use RDKit's atom.GetMonomerInfo() method to select atoms by name
         # Convert atom indicies into atom objects
         frag_atom_selections = [self.fragment_prody.select('index {}'.format(index)) for index in fragment_atom_indices]
 
         ligand_atoms = [atom for atom in target_prody]
         trgt_atom_selections = [ligand_atoms[index] for index in target_atom_indices]
-        # trgt_atom_selections = [target_prody.select('index {}'.format(index)) for index in target_atom_indices]
 
         # Save atom names for mapped fragment atoms in target ligand
-        # target_fragment_atom_names = ' '.join([atom.getNames()[0] for atom in trgt_atom_selections if atom != None])  # This isn't used anywhere... probably debugging at one point
         target_fragment_atom_serials = [str(atom.getSerial()) for atom in trgt_atom_selections if atom != None]
 
         # Get atom coordinates out of atom objects ({atom != None} because hydrogens were removed)
