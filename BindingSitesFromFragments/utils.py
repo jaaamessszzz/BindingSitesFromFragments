@@ -71,7 +71,7 @@ def minimum_contact_distance(a_H, b_H, return_indices=False, strip_H=True):
         return ligand_residue_distance_matrix.item(row_index_low, column_index_low)
 
 
-def find_conformer_and_constraint_resnums(pdb_name):
+def find_conformer_and_constraint_resnums(pdb_name, conformer_only=False):
     """
     Generates name of ideal binding motif from match PDB name
     :param pdb_name:
@@ -90,11 +90,23 @@ def find_conformer_and_constraint_resnums(pdb_name):
     conformer_id = pdb_split[conformer_id_index]
     conformer_name = '{}_{}'.format(ligand_name, conformer_id)
 
+    if conformer_only:
+        return conformer_name
+
     constraint_resnum_block = re.split('-|\.', pdb_name)[1]
     constraint_resnums = [int(a) for a in constraint_resnum_block.split('_') if a != ''][1:]
 
     return conformer_name, constraint_resnums
 
+
+def find_constraint_resnums(match_pdb):
+    """Return match positions if they exist"""
+    fuzzball_constraint_indicies = list()
+    with open(match_pdb, 'r') as my_match:
+        for line in my_match:
+            if line.startswith('REMARK 666 MATCH TEMPLATE'):
+                fuzzball_constraint_indicies.append(int(line.split()[11]))
+    return fuzzball_constraint_indicies
 
 def determine_matched_residue_positions(match_pdb_path):
     """
