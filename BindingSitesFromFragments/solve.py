@@ -18,7 +18,7 @@ import pyrosetta
 from pyrosetta import rosetta
 
 
-def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=None, include_defined=False):
+def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=None, include_defined=False, solutions=100000):
     """
     Use PyRosetta and a simulated annealing monte carlo method to find binding site solutions.
     This method for finding binding motif solutions DOES NOT TAKE CONSTRAINTS INTO CONSIDERATION. This means motif
@@ -57,8 +57,10 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     # Load fuzzball into prody and get defined residues
     fuzzball_base, fuzzball_pdb = os.path.split(fuzzball_path)
     fuzzball_agnpz = f'{fuzzball_pdb.split(".")[0]}.ag.npz'
-    fuzzball_prody = prody.loadAtoms(os.path.join(fuzzball_base, fuzzball_agnpz))
-    fuzzball_defined_residues = list(set(fuzzball_prody.select('defined 1').getResnums()))
+
+    if include_defined:
+        fuzzball_prody = prody.loadAtoms(os.path.join(fuzzball_base, fuzzball_agnpz))
+        fuzzball_defined_residues = list(set(fuzzball_prody.select('defined 1').getResnums()))
 
     # --- Init motif pose --- #
 
@@ -95,7 +97,7 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
 
 
     def get_new_residue(current_residues_in_fuzzball):
-        residue_from_fuzzball = int(random.randint(motif_pose.size() + 1, fuzzball_size))
+        residue_from_fuzzball = int(random.randint(2, fuzzball_size))
         if residue_from_fuzzball not in current_residues_in_fuzzball.values():
             return residue_from_fuzzball
         else:
@@ -137,27 +139,34 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
     # Set up infrastructure
     solution_list = list()
     solution_set = set()
-    temperatures = [10, 5, 1.5, 1.2, 0.9, 0.6, 0.3]
+    temperatures = [50, 10, 5, 1.5, 0.9, 0.6, 0.3]
 
     for kT in temperatures:
         print(f'Temperature: {kT}')
         mc = rosetta.protocols.moves.MonteCarlo(motif_pose, bsff_sfxn, kT)
 
-        for trial in range(2500 * fuzzball_size):
+        for trial in range(2000 * fuzzball_size):
+
+            trial_pose = motif_pose.clone()
 
             # Get random key:value pair and replace residue in motif
             current_motif_position, current_fuzzball_motif = random.choice(list(current_residues_in_fuzzball.items()))
             new_residue_index = get_new_residue(current_residues_in_fuzzball)
             random_motif_from_fuzzball = fuzzball_pose.residue(new_residue_index).clone()
 
-            motif_pose.replace_residue(current_motif_position, random_motif_from_fuzzball, False)
+            trial_pose.replace_residue(current_motif_position, random_motif_from_fuzzball, False)
 
-            if mc.boltzmann(motif_pose) and mc.last_accepted_score() < minimum_base_score:
+            # Only store new and improved solutions
+            accepted = mc.boltzmann(trial_pose)
+            if accepted and mc.last_accepted_score() < minimum_base_score:
 
                 # todo: Apply additional constraints here
                 # Add HBond donors/acceptors
                 # if not len(hbond_residue_set & set(defined_motif_resnums + current_residues_in_fuzzball.keys())) - len(defined_hbond_motifs) >= 1:
                 #     continue
+                
+                # Record trial                
+                motif_pose = trial_pose.clone()
 
                 current_residues_in_fuzzball[current_motif_position] = new_residue_index
                 new_solution_indicies = tuple(sorted(current_residues_in_fuzzball.values()))
@@ -170,15 +179,28 @@ def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=No
                                           'Obj_score': mc.last_accepted_score(),
                                           })
 
+            # Update minimum base score 
+            if trial % solutions == 0:
+                sorted_scores = sorted([a['Obj_score'] for a in solution_list])
+
+                # todo: clean this up later...
+                if len(sorted_scores) > solutions:
+                    minimum_base_score = sorted_scores[solutions]
+                elif len(sorted_scores) > 0:
+                    minimum_base_score = sorted_scores[-1]
+
+                print(f'New minimum base score: {minimum_base_score}')
+
     df = pd.DataFrame(solution_list)
-    df['Conformer'] = fuzzball_pdb.split('.')[0]
+    df_head = df.sort_values(by=['Obj_score'], ascending=True)[:solutions]
+    df_head['Conformer'] = fuzzball_pdb.split('.')[0]
 
     if block_count is None:
         df_csv_name = f'{fuzzball_pdb.split(".")[0]}-{motif_size - 1}_residue_solutions.csv'
     else:
         df_csv_name = f'{fuzzball_pdb.split(".")[0]}-{motif_size - 1}_residue_solutions-{block_count}.csv'
 
-    df.to_csv(df_csv_name, index=False)
+    df_head.to_csv(df_csv_name, index=False)
 
 
 def mc_crystallize(user_defined_dir, match_path, fuzzball_dir, fuzzball_index, positions_to_init=2, block_count=None):
