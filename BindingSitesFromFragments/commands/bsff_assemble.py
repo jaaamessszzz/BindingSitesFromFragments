@@ -64,7 +64,7 @@ def assemble(args):
         complex_ligand_id = args['--complex_ligand_id'] if args['--complex_ligand_id'] else None
 
         derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'], current_iteration_dir)
-        derp.assemble_fuzzball_for_existing_complex(args['<existing_complex_path>'], ligand_params, ligand_reference, complex_ligand_id=complex_ligand_id)
+        derp.assemble_fuzzball_for_existing_complex(args['<existing_complex_path>'], ligand_params, ligand_reference, complex_ligand_id=complex_ligand_id, force_limit=args['--force_limit'])
 
     else:
 
@@ -144,7 +144,7 @@ def assemble(args):
                 # Add residues to current fuzzball as defined residues
                 iteration_dict = {'minimum_definition': current_defined_residues, 'match_path': match_pdb}
                 fuzzball_path = derp.assemble_fuzzball(os.path.join(derp.rosetta_inputs, f'{fuzzball_conformer}.pdb'), iteration=iteration_dict, iteration_name=fuzzball_constraint,
-                                                       iteration_index=iteration, fuzzball_index=match_index)
+                                                       iteration_index=iteration, fuzzball_index=match_index, force_limit=args['--force_limit'])
 
                 # Add fuzzball to FeatureReporter list
                 with open(os.path.join(current_iteration_dir, 'fuzzball_list.txt'), 'a') as fuzzy_fuzz:
@@ -157,7 +157,7 @@ def assemble(args):
             with open(os.path.join(current_iteration_dir, 'fuzzball_list.txt'), 'w') as fuzzy_fuzz:
                 for conformer in pdb_check(derp.rosetta_inputs, conformer_check=True):
                     print(f'Assembling fuzzball for {os.path.basename(conformer)}')
-                    fuzzball_path = derp.assemble_fuzzball(conformer, add_user_defined_motifs=args['--add_user_defined_motifs'])
+                    fuzzball_path = derp.assemble_fuzzball(conformer, add_user_defined_motifs=args['--add_user_defined_motifs'], force_limit=args['--force_limit'])
                     fuzzy_fuzz.write(f'{fuzzball_path}\n')
 
 
