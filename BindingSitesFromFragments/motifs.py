@@ -26,45 +26,49 @@ from .utils import *
 # --- Silence ProDy --- #
 prody.confProDy(verbosity='none')
 
+# todo: there is no reason for this to be a class anymore...
+# todo: move Constraints to its own file
 class Generate_Constraints(object):
 
     three_to_one = {'ALA':'A', 'CYS':'C', 'ASP':'D', 'GLU':'E', 'PHE':'F', 'GLY':'G', 'HIS':'H', 'ILE':'I', 'LYS':'K',
                     'LEU':'L', 'MET':'M', 'ASN':'N', 'PRO':'P', 'GLN':'Q', 'ARG':'R', 'SER':'S', 'THR':'T', 'VAL':'V',
                     'TRP':'W', 'TYR':'Y'}
 
-    def __init__(self, user_defined_dir):
-        self.user_defined_dir = user_defined_dir
-        self.chemical_component_identifier = os.path.basename(os.path.normpath(user_defined_dir))[:3]
-        self.single_pose_dir = os.path.join(self.user_defined_dir, 'Fuzzballs')
+    def __init__(self, chemical_component_identifier):
+        self.chemical_component_identifier = chemical_component_identifier
 
-    def determine_constraint_atoms(self, residue_prody, conformer_prody, fragment=None, verbose=False):
+    def determine_constraint_atoms(self, residue_prody_H, conformer_prody_H, fragment=None, verbose=False):
         """
         Determine the three atoms in the ligand and the residue that will be used to calculate ideal values for the DOFs
         required for matcher.
 
         :param residue_prody: prody object of residue
         :param conformer_prody: prody object of current conformer
-        :param fragment: string of current fragment (e.g. "Fragment_1")
+        :param fragment: Path to PDB representation of current fragment (e.g. "Inputs/Fragment_Inputs/Fragment_1.pdb")
         :return: 
         """
 
+        residue_prody = residue_prody_H.select('not hydrogen').copy()
+        conformer_prody = conformer_prody_H.select('not hydrogen').copy()
+
         ligand_code = conformer_prody.getResnames()[0]
 
-        residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
+        residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody}
         residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
-        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in conformer_prody.select('not hydrogen')}
+        ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in conformer_prody}
 
         # Load residue and ligand as RDKit Mol objects
         RD_residue = RDKit_Mol_from_ProDy(residue_prody, removeHs=True)
-        RD_ligand = RDKit_Mol_from_ProDy(conformer_prody, removeHs=False)
+        RD_ligand = RDKit_Mol_from_ProDy(conformer_prody, removeHs=True)
 
         # Calculate closest atom-atom contacts and two additional atoms for determining bond torsions and angles
         # NOTE: Contact distance and indicies are for residue and ligand with hydrogens stripped!
 
         # Select source fragment atoms from current conformer is fragment is provided, else use entire ligand
         if fragment:
-            fragment_atoms_prody = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', f'Fragment_{fragment}.pdb'))
-            fragment_atom_names = fragment_atoms_prody.select('not hydrogen').getNames()
+            # fragment_atoms_prody = prody.parsePDB(os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', f'Fragment_{fragment}.pdb'))
+            fragment_atoms_prody = prody.parsePDB(fragment).select('not hydrogen').copy()
+            fragment_atom_names = fragment_atoms_prody.getNames()
             ligand_atoms_for_determining_contacts = conformer_prody.select(f'resname {ligand_code} and name {" ".join(fragment_atom_names)}')
 
         else:
@@ -72,8 +76,10 @@ class Generate_Constraints(object):
 
         contact_distance, residue_index_low, ligand_index_low = minimum_contact_distance(residue_prody, ligand_atoms_for_determining_contacts, return_indices=True)
 
-        residue_contact_atom = residue_prody.select('not hydrogen')[residue_index_low]
-        ligand_contact_atom = ligand_atoms_for_determining_contacts.select('not hydrogen')[ligand_index_low]
+        residue_contact_atom = residue_prody[residue_index_low]
+        ligand_contact_atomname = ligand_atoms_for_determining_contacts[ligand_index_low].getName()
+        ligand_contact_atom = conformer_prody.select(f'name {ligand_contact_atomname}')[0]
+
 
         # Select two additional atoms downstream from contact atom for meaningful constraints... programmatically...
         # Using RDKit to determine neighboring atoms, removes Hydrogens by default
@@ -103,9 +109,18 @@ class Generate_Constraints(object):
             else:
                 raise Exception('wut.')
 
+        # I literally don't even know, I think it's catching deuteriums...
+        elif residue_contact_atom.getName()[0] not in ['C', 'N', 'O', 'S', 'P']:
+            print('wtf...')
+            prody.writePDB(f'{residue_prody_H.getData("contact_source")[0]}.pdb', residue_prody_H)
+            return False
+
         else:
             residue_second_atom = self._determine_next_residue_constraint_atom(residue_contact_atom.getIndex(), RD_residue, residue_prody)
+            if residue_second_atom == None: return False
+
             residue_third_atom = self._determine_next_residue_constraint_atom(residue_second_atom, RD_residue, residue_prody)
+            if residue_third_atom == None: return False
 
         ligand_second_atom, ligand_third_atom = self._determine_ligand_constraint_atoms(ligand_contact_atom.getIndex(), RD_ligand, ligand_atoms_for_determining_contacts)
 
@@ -151,7 +166,7 @@ class Generate_Constraints(object):
         # Okay so I can't figure out for now how to retrieve atom names from RDKit atom objects,,,
         # I'm going to create a dict mapping atom indices to atom names from the prody object
         # Prody and RDKit both seem to derive atom indices in order of the PDB file
-        residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody.select('not hydrogen')}
+        residue_index_atom_map = {atom.getIndex(): atom.getName() for atom in residue_prody}
         residue_atom_index_map = {v: k for k, v in residue_index_atom_map.items()}
 
         # Setting up hierarchy for residue atom selections - want selections to propagate toward main chain
@@ -167,7 +182,6 @@ class Generate_Constraints(object):
             next_atom_index = residue_contact_atom_neighbors[0]
             return next_atom_index
 
-
         else:
             first_atom_ID = residue_index_atom_map[current_atom_index]
             # Special case for Prolines. CG > N causes issues with atom[1]... is there another fix? Yes. But it's 12am
@@ -178,7 +192,8 @@ class Generate_Constraints(object):
                     next_atom_index = residue_atom_index_map[atom]
                     return next_atom_index
 
-            raise Exception('Somehow you\'ve run out of neighbors for your contact atom...')
+            return None
+            # raise Exception('Somehow you\'ve run out of neighbors for your contact atom...')
 
     def _determine_ligand_constraint_atoms(self, current_atom_index, RD_ligand, ligand_fragment_prody):
         """
@@ -189,8 +204,7 @@ class Generate_Constraints(object):
         :return: 
         """
         ligand_index_atom_map = {atom.getIndex(): atom.getName() for atom in ligand_fragment_prody.select('not hydrogen')}
-        ligand_contact_atom_neighbors = [atom for atom in
-                                         RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors() if atom.GetIdx() in ligand_index_atom_map.keys()]
+        ligand_contact_atom_neighbors = [atom for atom in RD_ligand.GetAtomWithIdx(int(current_atom_index)).GetNeighbors() if atom.GetIdx() in ligand_index_atom_map.keys()]
 
         # Check all atoms that are adjacent to ligand contact atom
         for second_atom in ligand_contact_atom_neighbors:
@@ -234,25 +248,13 @@ class Generate_Constraints(object):
         ligand_third_atom = list(set([atom.GetIdx() for atom in ligand_contact_atom_neighbors]) - set([ligand_second_atom]))[0]
         return ligand_second_atom, ligand_third_atom
 
-    def generate_single_constraint_block(self, single_pose_prody, current_conformer, residue_index,
-                                         distance_tolerance=0.5, angle_A_tolerance=5, angle_B_tolerance=5,
-                                         torsion_A_tolerance=5, torsion_AB_tolerance=5, torsion_B_tolerance=5,
-                                         torsion_constraint_sample_number=1, angle_constraint_sample_number=1,
-                                         distance_constraint_sample_number=0, greasy_sampling=False):
+    def calculate_matcher_dofs(self, residue_prody, ligand_prody, fragment=None, return_constraint_dict=True):
         """
-        Generate a single constraint block for one residue-ligand interaction
-        :return: 
+        Calcualtes DOFs used by the matcher to build a ligand out from a residue
+        :return:
         """
-        # todo: single_pose_prody should be loaded from .ag.npz
-        residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(residue_index)).copy()
-        residue_fragment_data = residue_prody.getData("Fragment")
-        current_fragment = None if residue_fragment_data is None else residue_prody.getData("Fragment")[0]
-        current_conformer_prody = single_pose_prody.select(f'resname {self.chemical_component_identifier}').copy()
-        constraint_atoms_dict = self.determine_constraint_atoms(residue_prody, current_conformer_prody, fragment=current_fragment)
 
-        ligand = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
-        ligand_prody = single_pose_prody.select('resname {}'.format(ligand)).copy()
-        residue_prody = single_pose_prody.select('resnum {}'.format(residue_index)).copy()
+        constraint_atoms_dict = self.determine_constraint_atoms(residue_prody, ligand_prody, fragment=fragment)
 
         #########################################################################################
         # Get ideal distance, angle, and torsion values from representative motif residue prody #
@@ -291,6 +293,55 @@ class Generate_Constraints(object):
             residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][1])),
             residue_prody.select('index {}'.format(constraint_atoms_dict['residue']['atom_indices'][2]))
         )
+
+        dof_tuple = ideal_distance, ideal_angle_A, ideal_angle_B, ideal_torsion_A, ideal_torsion_AB, ideal_torsion_B
+
+        if return_constraint_dict:
+            return dof_tuple, constraint_atoms_dict
+        else:
+            return dof_tuple
+
+    def generate_single_constraint_block(self, fragment_dir, single_pose_prody, residue_index, fragment=None,
+                                         distance_tolerance=0.5, angle_A_tolerance=5, angle_B_tolerance=5,
+                                         torsion_A_tolerance=5, torsion_AB_tolerance=5, torsion_B_tolerance=5,
+                                         torsion_constraint_sample_number=1, angle_constraint_sample_number=1,
+                                         distance_constraint_sample_number=0, greasy_sampling=False):
+        """
+        Wrapper to generate a single constraint block from a fuzzball interaction
+        :param fragment_dir: Path to directory containing fragment PDBs (Fragment_Inputs)
+        :param single_pose_prody:
+        :param residue_index:
+        :return:
+        """
+
+        # single_pose_prody should be loaded from .ag.npz
+        ligand_prody = single_pose_prody.select('resname {}'.format(self.chemical_component_identifier)).copy()
+        residue_prody = single_pose_prody.select('resnum {} and not hydrogen'.format(residue_index)).copy()
+
+        # Get fragment path
+        residue_fragment_data = residue_prody.getData("fragment_id")
+        current_fragment = None if residue_fragment_data is None else f'Fragment_{residue_fragment_data[0]}'
+        current_fragment_path = os.path.join(fragment_dir, f'{current_fragment}.pdb') if current_fragment else None
+
+        return self.generate_single_constraint_block_base(residue_prody, ligand_prody, fragment=current_fragment_path,
+                                                          distance_tolerance=distance_tolerance, angle_A_tolerance=angle_A_tolerance, angle_B_tolerance=angle_B_tolerance,
+                                                          torsion_A_tolerance=torsion_A_tolerance, torsion_AB_tolerance=torsion_AB_tolerance, torsion_B_tolerance=torsion_B_tolerance,
+                                                          torsion_constraint_sample_number=torsion_constraint_sample_number,
+                                                          angle_constraint_sample_number=angle_constraint_sample_number,
+                                                          distance_constraint_sample_number=distance_constraint_sample_number, greasy_sampling=greasy_sampling)
+
+    def generate_single_constraint_block_base(self, residue_prody, ligand_prody, fragment=None,
+                                         distance_tolerance=0.5, angle_A_tolerance=5, angle_B_tolerance=5,
+                                         torsion_A_tolerance=5, torsion_AB_tolerance=5, torsion_B_tolerance=5,
+                                         torsion_constraint_sample_number=1, angle_constraint_sample_number=1,
+                                         distance_constraint_sample_number=0, greasy_sampling=False):
+        """
+        Generate a single constraint block for one residue-ligand interaction
+        :return: 
+        """
+
+        dof_tuple, constraint_atoms_dict = self.calculate_matcher_dofs(residue_prody, ligand_prody, fragment=fragment)
+        ideal_distance, ideal_angle_A, ideal_angle_B, ideal_torsion_A, ideal_torsion_AB, ideal_torsion_B = dof_tuple
 
         # Updated this for backbone contacts to allow for any residue identity
         if constraint_atoms_dict['residue']['atom_names'][0] in ['C', 'CA', 'N', 'O', 'OXT']:
@@ -335,175 +386,7 @@ class Generate_Constraints(object):
 
         return constraint_atoms_dict, constraint_block
 
-    def BW_constraints_from_gurobi_solutions(self, gurobi_solutions_csv, conformer, use_solution_residues_only=True):
-        """
-        Generate xml constraint files for Gurobi solutions using Brian Weitzner's combinatorial matcher.
-        
-        :param gurobi_solutions_csv: path to csv containing solutions generated by gurobi
-        :param conformer: string specifying current conformer e.g. MEH_0001
-        :param use_solution_residues_only: if true, only use cluster residues that are members of solutions. Otherwise,
-        use all residues from clusters in matcher file
-        :return: 
-        """
-        #################################
-        # Import all solutions from csv #
-        #################################
-
-        gurobi_solutions = pd.read_csv(gurobi_solutions_csv, usecols=['Residue_indicies'])
-        pprint.pprint(gurobi_solutions)
-
-        # todo: ALSO NEED TO CONSIDER RESIDUE IDENTITY!!!
-        # todo: alter res_idx_map_df so that all of this information is already available in the csv
-        for index, row in self.res_idx_map_df.iterrows():
-            pdb_name_split = re.split('-|_', row['source_pdb'])
-            cluster_pdb = '-'.join(row['source_pdb'].split('-')[1:])
-            self.res_idx_map_df.loc[index, 'fragment'] = pdb_name_split[1]
-            self.res_idx_map_df.loc[index, 'cluster'] = pdb_name_split[3]
-            self.res_idx_map_df.loc[index, 'resname'] = prody.parsePDB(os.path.join(self.user_defined_dir,
-                                                                                    'Cluster_Results',
-                                                                                    'Fragment_{}'.format(pdb_name_split[1]),
-                                                                                    cluster_pdb)
-                                                                       ).getResnames()[0]
-
-        #########################################################
-        # Consolidate solutions based on residue source cluster #
-        #########################################################
-
-        # Make set([source clusters]) E all solutions
-        cluster_list_set = set()
-        # Keep track of residues used in solutions
-        cluster_residue_set = set()
-
-        # For each solution...
-        for solution in gurobi_solutions['Residue_indicies']:
-            # Use residue_index_mapping to find source cluster for all residues excluding index 1 (ligand)
-            relevant_rows = self.res_idx_map_df.loc[self.res_idx_map_df['residue_index'].isin(literal_eval(solution)[1:]) & (self.res_idx_map_df['source_conformer'] == conformer)]
-
-            # Add tuple of (fragment, cluster, resname) to cluster_list_set
-            cluster_list_set.add(tuple([(row['fragment'], row['cluster'], row['resname']) for index, row in relevant_rows.iterrows()]))
-
-            # if use_solution_residues_only, keep track of residues (df index in self.res_idx_map_df)
-            if use_solution_residues_only:
-                for index, row in relevant_rows.iterrows():
-                    cluster_residue_set.add(index)
-
-        print("Solutions contain {} unique cluster solutions consisted of {} residues".format(len(cluster_list_set), len(cluster_residue_set)))
-
-        ############################################################
-        # Generate matcher xml for each unique cluster combination #
-        ############################################################
-
-        single_pose_prody = prody.parsePDB(os.path.join(self.single_pose_dir, '{}-single_pose.pdb'.format(conformer)))
-        fragment_cluster_groups = self.res_idx_map_df.groupby(['fragment', 'cluster', 'resname'])
-        bw_gurobi_constraints_dirpath = os.path.join(self.user_defined_dir, 'BW_Matcher_Constraints')
-        os.makedirs(bw_gurobi_constraints_dirpath, exist_ok=True)
-
-        # todo: would make it faster if I stuck all the residue_row_indices in a dict an just did lookups...
-        # For each unqiue combination of cluster solutions
-        for solution_tuples in sorted(list(cluster_list_set)):
-            # Create constraint file
-            contraint_file_name = '-'.join(['_'.join([toop[0], toop[1], self.three_to_one[toop[2]]]) for toop in solution_tuples]) + '.xml'
-            bw_constraint_file = open(os.path.join(bw_gurobi_constraints_dirpath, contraint_file_name), 'w')
-
-            print(contraint_file_name)
-
-            # For each cluster within a solution
-            for solution_tuple in solution_tuples: # (fragment, cluster)
-
-                bw_constraint_file.write('<MatcherConstraint>\n')
-
-                # Get upstream and downstream three-letter IDs
-                downstream_residue = os.path.basename(os.path.normpath(self.user_defined_dir))[:3]
-                upstream_residue = solution_tuple[2]
-
-                # Get residues that will constitute a constraint block
-                if use_solution_residues_only:
-                    residue_row_indices = list(set(fragment_cluster_groups.get_group(solution_tuple).index) & cluster_residue_set)
-                else:
-                    residue_row_indices = list(fragment_cluster_groups.get_group(solution_tuple).index)
-
-                # Get concensus contacts for each residue in cluster
-                residue_contact_list = []
-                ligand_contact_list = []
-
-                for cluster_residue in residue_row_indices:
-                    residue_index = fragment_cluster_groups.get_group(solution_tuple).loc[cluster_residue, 'residue_index']
-                    constraint_atoms_dict = self.determine_constraint_atoms_from_single_pose(single_pose_prody, conformer, residue_index, verbose=False)
-                    residue_contact_list.append(tuple(constraint_atoms_dict['residue']['atom_names']))
-                    ligand_contact_list.append(tuple(constraint_atoms_dict['ligand']['atom_names']))
-
-                # Get most frequently selected matcher atoms
-                residue_contact_count = collections.Counter(residue_contact_list)
-                ligand_contact_count = collections.Counter(ligand_contact_list)
-
-                residue_contact_atoms = residue_contact_count.most_common()[0][0]
-                ligand_contact_atoms = ligand_contact_count.most_common()[0][0]
-
-                # Add to constraint block
-                bw_constraint_file.write('\t<UpstreamResidue atom1="{0}" atom2="{1}" atom3="{2}" name="{3}"/>\n'.format(residue_contact_atoms[0], residue_contact_atoms[1], residue_contact_atoms[2], upstream_residue))
-                bw_constraint_file.write('\t<DownstreamResidue atom1="{0}" atom2="{1}" atom3="{2}" name="{3}"/>\n'.format(ligand_contact_atoms[0], ligand_contact_atoms[1], ligand_contact_atoms[2], downstream_residue))
-
-                # For each residue in the cluster...
-                for cluster_residue in residue_row_indices:
-                    residue_index = fragment_cluster_groups.get_group(solution_tuple).loc[cluster_residue, 'residue_index']
-
-                    # ideal_distance = constraint_atoms_dict['contact_distance']
-                    ideal_distance = prody.calcDistance(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), # constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), # constraint_atoms_dict['residue']['atom_indices'][0]))
-                    )
-
-                    # 'angle_A' is the angle Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                    ideal_angle_A = prody.calcAngle(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[1])), #constraint_atoms_dict['ligand']['atom_indices'][1])),
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), #constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), #constraint_atoms_dict['residue']['atom_indices'][0]))
-                    )
-                    # 'angle_B' is the angle Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                    ideal_angle_B = prody.calcAngle(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), #constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), #constraint_atoms_dict['residue']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[1])), #constraint_atoms_dict['residue']['atom_indices'][1]))
-                    )
-                    # 'torsion_A' is the dihedral Res1:Atom3 - Res1:Atom2 - Res1:Atom1 - Res2:Atom1
-                    ideal_torsion_A = prody.calcDihedral(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[2])), #constraint_atoms_dict['ligand']['atom_indices'][2])),
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[1])), #constraint_atoms_dict['ligand']['atom_indices'][1])),
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), #constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), #constraint_atoms_dict['residue']['atom_indices'][0]))
-                    )
-                    # 'torsion_AB' is the dihedral Res1:Atom2 - Res1:Atom1 - Res2:Atom1 - Res2:Atom2
-                    ideal_torsion_AB = prody.calcDihedral(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[1])), #constraint_atoms_dict['ligand']['atom_indices'][1])),
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), #constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), #constraint_atoms_dict['residue']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[1])), #constraint_atoms_dict['residue']['atom_indices'][1]))
-                    )
-                    # 'torsion_B' is the dihedral Res1:Atom1 - Res2:Atom1 - Res2:Atom2 - Res2:Atom3
-                    ideal_torsion_B = prody.calcDihedral(
-                        single_pose_prody.select('resnum {} and name {}'.format(1, ligand_contact_atoms[0])), #constraint_atoms_dict['ligand']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[0])), #constraint_atoms_dict['residue']['atom_indices'][0])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[1])), #constraint_atoms_dict['residue']['atom_indices'][1])),
-                        single_pose_prody.select('resnum {} and name {}'.format(residue_index, residue_contact_atoms[2])), #constraint_atoms_dict['residue']['atom_indices'][2]))
-                    )
-
-                    # todo: add options for tolerances and other goodies
-                    # Write to constraint file
-                    bw_constraint_file.write('\t<Combination>\n')
-                    bw_constraint_file.write('\t\t<!--{}-->\n'.format(fragment_cluster_groups.get_group(solution_tuple).loc[cluster_residue, 'source_pdb']))
-                    bw_constraint_file.write('\t\t<DistanceAB x0="{0}" xtol="0.00" k="0" periodicity="0.00" noSamples="0"/>\n'.format(ideal_distance[0]))
-                    bw_constraint_file.write('\t\t<AngleA x0="{0}" xtol="0.00" k="0" periodicity="360.00" noSamples="0"/>\n'.format(ideal_angle_A[0]))
-                    bw_constraint_file.write('\t\t<AngleB x0="{0}" xtol="0.00" k="0" periodicity="360.00" noSamples="0"/>\n'.format(ideal_angle_B[0]))
-                    bw_constraint_file.write('\t\t<TorsionA x0="{0}" xtol="0.00" k="0" periodicity="360.00" noSamples="0"/>\n'.format(ideal_torsion_A[0]))
-                    bw_constraint_file.write('\t\t<TorsionAB x0="{0}" xtol="0.00" k="0" periodicity="360.00" noSamples="0"/>\n'.format(ideal_torsion_AB[0]))
-                    bw_constraint_file.write('\t\t<TorsionB x0="{0}" xtol="0.00" k="0" periodicity="360.00" noSamples="0"/>\n'.format(ideal_torsion_B[0]))
-                    bw_constraint_file.write('\t</Combination>\n')
-
-                bw_constraint_file.write('</MatcherConstraint>\n')
-
-            bw_constraint_file.close()
-
-    def conventional_constraints_from_gurobi_solutions(self, gurobi_solutions_csv_dir, fuzzball_dir, constraints_to_generate=100000,
+    def conventional_constraints_from_gurobi_solutions(self, user_defined_dir, gurobi_solutions_csv_dir, fuzzball_dir, constraints_to_generate=100000,
                                                        offset=0, angle_dihedral_tolerance=5, angle_dihedral_sample_number=1,
                                                        iteration=False, greasy_sampling=False, json_output=False, consolidate_solutions=False):
         """
@@ -536,7 +419,7 @@ class Generate_Constraints(object):
                     if residue_index not in previously_calculated_constraint_blocks.keys():
                         print('Calculating constraint block for {} - {}'.format(current_conformer, residue_index))
                         constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(
-                            conformer_fuzzball, current_conformer, residue_index,
+                            fragment_inputs_path, conformer_fuzzball, residue_index,
                             angle_A_tolerance=angle_dihedral_tolerance, angle_B_tolerance=angle_dihedral_tolerance,
                             torsion_A_tolerance=angle_dihedral_tolerance,
                             torsion_AB_tolerance=angle_dihedral_tolerance,
@@ -569,7 +452,7 @@ class Generate_Constraints(object):
                     else:
                         print('Calculating constraint block for {} - {}'.format(current_conformer, residue_index))
                         constraint_atoms_dict, constraint_block = self.generate_single_constraint_block(
-                            conformer_fuzzball, current_conformer, residue_index,
+                            fragment_inputs_path, conformer_fuzzball, residue_index,
                             angle_A_tolerance=angle_dihedral_tolerance, angle_B_tolerance=angle_dihedral_tolerance,
                             torsion_A_tolerance=angle_dihedral_tolerance,
                             torsion_AB_tolerance=angle_dihedral_tolerance,
@@ -599,7 +482,8 @@ class Generate_Constraints(object):
                     prody.writePDB(os.path.join(gurobi_motif_path, motif_pdb_filename), binding_motif)
 
         # Set things up
-        gurobi_things_path = os.path.join(self.user_defined_dir, 'Gurobi_Constraints')
+        fragment_inputs_path = os.path.join(user_defined_dir, 'Inputs', 'Fragment_Inputs')
+        gurobi_things_path = os.path.join(user_defined_dir, 'Gurobi_Constraints')
         gurobi_constraints_path = os.path.join(gurobi_things_path, 'Constraints')
         gurobi_motif_path = os.path.join(gurobi_things_path, 'Motif_PDBs')
 
@@ -656,7 +540,7 @@ class Generate_Constraints(object):
                 _populate_constraint_json() if json_output else _generate_constraint_files()
 
         if json_output:
-            json_output_path = os.path.join(gurobi_constraints_path, '{}-constraint_blocks.json'.format(self.user_defined_dir))
+            json_output_path = os.path.join(gurobi_constraints_path, '{}-constraint_blocks.json'.format(user_defined_dir))
             with open(json_output_path, 'w') as muh_json:
                 json.dump(json_dict, muh_json)
 
@@ -697,6 +581,7 @@ class Generate_Constraints(object):
             np.newaxis].T
 
         return prody.Transformation(rotation_matrix, np.ravel(translation_vector))
+
 
 class Generate_Fuzzball_using_PyRosetta(object):
     """
@@ -762,7 +647,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
         self.hbond_atom_set = None  # Initialized in _init_get_ligand_hbond_atoms()
 
         self.motif_residue_attributes_df = None  # Either loaded in assemble_fuzzball() or score_motif_conformer_interactions()
-
+        self.reference_complex_atomname_map = None  # Assigned if assembling fuzzball for existing complex
+        
         # todo: fix this jankiness
         self.generate_constraints = Generate_Constraints(self.user_defined_dir)
         
@@ -790,8 +676,12 @@ class Generate_Fuzzball_using_PyRosetta(object):
             fragment_cluster_dir = os.path.join(cluster_results_dir, fragment)
 
             for cluster in pdb_check(fragment_cluster_dir, extension='.ag.npz'):
-                cluster_number = int(re.split('[_.]', os.path.normpath(os.path.basename(cluster)))[1])
-                temp_cluster_dict[fragment][cluster_number] = prody.loadAtoms(os.path.join(cluster))
+                cluster_name_split = re.split('[_.]', os.path.normpath(os.path.basename(cluster)))
+                cluster_cat_index = int(cluster_name_split[1])
+                cluster_contact_index = int(cluster_name_split[2])
+                if cluster_cat_index not in temp_cluster_dict[fragment].keys():
+                    temp_cluster_dict[fragment][cluster_cat_index] = dict()
+                temp_cluster_dict[fragment][cluster_cat_index][cluster_contact_index] = prody.loadAtoms(cluster)
 
         self.cluster_dict = temp_cluster_dict
 
@@ -803,6 +693,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
         """
         ligand_mol = RDKit_Mol_from_ProDy(self.reference_conformer_prody)
 
+        # todo: update to use new Rosetta HBond class
         # --- Hydrogen bond donor/acceptor definitions --- #
 
         # Pulled from rdkit/Chem/Lipinski.py
@@ -832,9 +723,13 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         print(f'Hydrogen bond donors/acceptors identified: {" ".join(self.hbond_atom_set)}\n')
 
-    def score_motif_conformer_interactions(self):
+    def score_motif_conformer_interactions(self, conformer_dir=None, apply_mapping=False):
         """
         Performs the bulk of work for generating fuzzballs
+
+        Conformer directory should contain PDB/params pairs for each ligand conformer
+        :param conformer_dir: directory containing ligand conformers to score against
+        :param apply_mapping: maps fuzzball atom names onto ligand atoms in an existing complex
         :return:
         """
 
@@ -842,77 +737,100 @@ class Generate_Fuzzball_using_PyRosetta(object):
         # List of dicts for residue information
         fuzzball_list_of_dicts = list()
 
+        # Set conformer directory
+        if not conformer_dir:
+            conformer_dir = self.rosetta_inputs
+
+        # Make sure conformer directory exists
+        if not os.path.exists(conformer_dir):
+            raise Exception(f'{conformer_dir} does not exist!')
+
         # For each conformer
-        for conformer in pdb_check(self.rosetta_inputs):
+        for conformer in pdb_check(conformer_dir):
+
+            # Initialize PyRosetta with stuff
+            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
+            current_params = conformer_name if conformer_dir == self.rosetta_inputs else self.chemical_component_identifier
+            current_params_path = os.path.join(conformer_dir, f'{current_params}.params')
+
+            # core.conformation.Conformation muted, OXT is missing from all motif residues
+            my_options = [f"-extra_res_fa {current_params_path} -flip_HNQ -packing:linmem_ig 20",
+                          "-mute core.conformation core.chemical"]
+            pyrosetta.init(options=' '.join(my_options))
 
             # Load conformer as Prody object
             conformer_prody = prody.parsePDB(conformer)
 
+            # Load conformer as PyRosetta Pose
+            conformer_pose = rosetta.core.import_pose.pose_from_file(conformer)
+
             # Iterate through self.cluster_dict (for loops all the way down...)
             for fragment in self.cluster_dict:
+
+                fragment_path = os.path.join(self.user_defined_dir, 'Inputs', 'Fragment_Inputs', f'{fragment}.pdb')
 
                 # Save transformed clusters in a dict()
                 transformed_cluster_dict = dict()
 
-                for cluster in self.cluster_dict[fragment]:
+                for cat_cluster in self.cluster_dict[fragment]:
+                    for cluster in self.cluster_dict[fragment][cat_cluster]:
+                        current_cluster = self.cluster_dict[fragment][cat_cluster][cluster]
 
-                    current_cluster = self.cluster_dict[fragment][cluster]
+                        # Make copy of conformer for current cluster
+                        current_conformer_and_transformed_residues = conformer_prody.copy()
 
-                    # Make copy of conformer for current cluster
-                    current_conformer_and_transformed_residues = conformer_prody.copy()
+                        # --- Transform cluster residues onto target conformer --- #
 
-                    # --- Transform cluster residues onto target conformer --- #
+                        for residue in current_cluster.iterResidues():
 
-                    for residue in current_cluster.iterResidues():
+                            # todo: condense this
+                            # Skip residues if essential backbone atoms are missing
+                            defined_residue_bb_atoms = [a.getName() for a in residue.select('backbone')]
+                            if len(set(defined_residue_bb_atoms) & {'C', 'CA', 'N', 'O'}) != 4:
+                                continue
 
-                        # todo: condense this
-                        # Skip residues if essential backbone atoms are missing
-                        defined_residue_bb_atoms = [a.getName() for a in residue.select('backbone')]
-                        if len(set(defined_residue_bb_atoms) & {'C', 'CA', 'N', 'O'}) != 4:
-                            continue
+                            # Skip residues if they possess multiple occupancies (4bn4 ARG 345)
+                            if len(set(residue.getAltlocs())) > 1:
+                                print(f'{residue.getData("contact_source")[0]} possesses alternate locations and will not be considered.')
+                                continue
 
-                        # Skip residues if they possess multiple occupancies (4bn4 ARG 345)
-                        if len(set(residue.getAltlocs())) > 1:
-                            print(residue.getAltlocs())
-                            print(f'{residue.getData("contact_source")[0]} possesses alternate locations and will not be considered.')
-                            continue
+                            # Skip residue if more than 50% of atoms have zero occupancy (cutoff is completely arbitrary...)
+                            if len([a for a in residue.getOccupancies() if a == 0]) > (len(residue) / 2):
+                                print(f'More than 50% of atoms in {residue.getData("contact_source")[0]} have 0 occupancy and will not be considered.')
+                                continue
 
-                        # Skip residue if more than 50% of atoms have zero occupancy (cutoff is completely arbitrary...)
-                        if len([a for a in residue.getOccupancies() if a == 0]) > (len(residue) / 2):
-                            print([a for a in residue.getOccupancies() if a == 0])
-                            print(f'More than 50% of atoms in {residue.getData("contact_source")[0]} have 0 occupancy and will not be considered.')
-                            continue
+                            transformed_motif, constraint_atoms_dict = self.transform_residue_about_current_conformer(conformer_prody, residue, fragment=fragment_path, apply_mapping=apply_mapping)
 
-                        transformed_motif, constraint_atoms_dict = self.transform_residue_about_current_conformer(conformer_prody, residue, fragment=fragment)
+                            # Add residue to current_conformer_and_transformed_residues collection for scoring
+                            if transformed_motif is not None:
+                                current_conformer_and_transformed_residues += transformed_motif
 
-                        # Add residue to current_conformer_and_transformed_residues collection for scoring
-                        if transformed_motif is not None:
-                            current_conformer_and_transformed_residues += transformed_motif
-
-                    # Save all transformed cluster residues to transformed_cluster_dict
-                    if current_conformer_and_transformed_residues.numResidues() > 1:
-                        transformed_cluster_dict[cluster] = current_conformer_and_transformed_residues
-                    else:
-                        print(f'\nAll motif residues from {fragment} Cluster {cluster} were rejected!\n')
+                        # Save all transformed cluster residues to transformed_cluster_dict
+                        if current_conformer_and_transformed_residues.numResidues() > 1:
+                            transformed_cluster_dict[f'{cat_cluster}-{cluster}'] = current_conformer_and_transformed_residues
+                        else:
+                            print(f'\nAll motif residues from {fragment} Cluster {cat_cluster}-{cluster} were rejected!\n')
 
                 # --- Score all clusters for current fragment using PyRosetta and record scores/attributes --- #
 
-                # Initialize PyRosetta with stuff
-                conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
-                current_params_path = os.path.join(self.rosetta_inputs, f'{conformer_name}.params')
+                bsff_sfxn = rosetta.core.scoring.ScoreFunction()
+                bsff_sfxn.set_weight(rosetta.core.scoring.fa_atr, 1)
+                bsff_sfxn.set_weight(rosetta.core.scoring.fa_rep, 0.55)
+                bsff_sfxn.set_weight(rosetta.core.scoring.fa_sol, 1)
+                bsff_sfxn.set_weight(rosetta.core.scoring.fa_elec, 1)
+                bsff_sfxn.set_weight(rosetta.core.scoring.hbond_sc, 1)
+                bsff_sfxn.set_weight(rosetta.core.scoring.hbond_bb_sc, 1)
 
-                # core.conformation.Conformation muted, OXT is missing from all motif residues
-                my_options = [f"-extra_res_fa {current_params_path}",
-                              "-mute core.conformation core.chemical"]
-
-                pyrosetta.init(options=' '.join(my_options))
-                sfxn = rosetta.core.scoring.get_score_function()
+                sfxn_weights = bsff_sfxn.weights()
 
                 for transformed_cluster in transformed_cluster_dict:
 
                     transformed_cluster_prody = transformed_cluster_dict[transformed_cluster]
 
-                    transformed_residues_only_hv = transformed_cluster_prody.select(f'not resname {self.chemical_component_identifier}').getHierView()
+                    transformed_residues_only = transformed_cluster_prody.select(f'not resname {self.chemical_component_identifier}')
+                    if transformed_residues_only is None:
+                        continue
+                    transformed_residues_only_hv = transformed_residues_only.getHierView()
                     ligand_prody = transformed_cluster_prody.select(f'resname {self.chemical_component_identifier} and not hydrogen')
 
                     # Convert prody of transformed cluster into string
@@ -923,7 +841,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                     # Load transformed cluster into PyRosetta
                     transformed_cluster_pose = rosetta.core.pose.Pose()
                     rosetta.core.import_pose.pose_from_pdbstring(transformed_cluster_pose, transformed_cluster_stream.getvalue())
-                    sfxn(transformed_cluster_pose)
+                    bsff_sfxn(transformed_cluster_pose)
 
                     # Assert only the ligand was removed from selection...
                     # Need to catch residues with zero occupancy... rosetta throws them out while prody is fine
@@ -945,6 +863,24 @@ class Generate_Fuzzball_using_PyRosetta(object):
                     # Record attributes for all residues in a transformed cluster
                     for index, residue_prody in enumerate(transformed_residues_only_hv.iterResidues(), start=2):
 
+                        # OptH and rescore for all polar residues (except ARG) in independent pose
+                        if residue_prody.getResname() in ['ASP', 'GLU', 'HIS', 'LYS', 'ASN', 'GLN', 'SER', 'THR', 'TYR']:
+                            conformer_residue_opth = conformer_pose.clone()
+                            residue_residue = transformed_cluster_pose.residue(index).clone()
+                            conformer_residue_opth.append_residue_by_jump(residue_residue, 1)
+
+                            rosetta.core.pack.optimizeH(conformer_residue_opth, bsff_sfxn)
+                            bsff_sfxn(conformer_residue_opth)
+                            e_edge_opth = conformer_residue_opth.energies().energy_graph()
+                            what = e_edge_opth.find_energy_edge(1, 2)
+
+                        else:
+                            # Energy-related attributes
+                            what = e_edge.find_energy_edge(index, 1)
+
+                        if what is None:
+                            continue
+
                         residue_attribute_dict = dict()
 
                         # Identification attributes
@@ -954,21 +890,15 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         residue_attribute_dict['contact_source'] = residue_prody.copy().getData('contact_source')[0]
                         residue_attribute_dict['resname'] = residue_prody.getResname()
 
-                        # Energy-related attributes
-                        what = e_edge.find_energy_edge(index, 1).fill_energy_map()
-
-                        total_score = sum([what[rosetta.core.scoring.fa_rep] * 0.55,
-                                           what[rosetta.core.scoring.fa_atr],
-                                           what[rosetta.core.scoring.hbond_sc],
-                                           what[rosetta.core.scoring.fa_sol],
-                                           what[rosetta.core.scoring.fa_elec]
-                                           ]
-                                          )
+                        current_edge = what.fill_energy_map()
+                        total_score = current_edge.dot(sfxn_weights)
 
                         residue_attribute_dict['total_score'] = total_score
 
                         hbond_sc_score = what[rosetta.core.scoring.hbond_sc]
+                        hbond_bb_sc_score = what[rosetta.core.scoring.hbond_bb_sc]
                         residue_attribute_dict['hbond_sc'] = hbond_sc_score
+                        residue_attribute_dict['hbond_bb_sc'] = hbond_bb_sc_score
 
                         # Report contact atom in self.hbond_atom_set if hbondsc < 0, else None
                         ligand_prody_stripped = ligand_prody.select('not hydrogen')
@@ -977,7 +907,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         ligand_residue_distance_matrix = prody.buildDistMatrix(ligand_prody_stripped.getCoords(),
                                                                                residue_prody_stripped.getCoords())
 
-                        if hbond_sc_score < 0:
+                        if hbond_sc_score < 0 or hbond_bb_sc_score < 0:
 
                             # Identify atom on residue mediating contact (residue_contact_atom)
                             residue_contact_index = np.argmin(np.min(ligand_residue_distance_matrix, axis=0))  # Row (Residue)
@@ -998,22 +928,24 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         fuzzball_list_of_dicts.append(residue_attribute_dict)
 
         temp_df = pd.DataFrame(fuzzball_list_of_dicts)
-        temp_df.drop_duplicates(subset=['conformer', 'contact_source', 'hbond_sc', 'ligand_contact', 'resname', 'total_score'], keep='first', inplace=True)
+        temp_df.drop_duplicates(subset=['conformer', 'contact_source', 'hbond_sc', 'hbond_bb_sc', 'ligand_contact', 'resname', 'total_score'], keep='first', inplace=True)
         self.motif_residue_attributes_df = temp_df
 
         # todo: should really be dumping into SQLite3 database...
-        self.motif_residue_attributes_df.to_csv(os.path.join(self.user_defined_dir, 'motif_residue_attributes.csv'), index=False)
+        design_dir, conformer_file = os.path.split(conformer_dir)
+        dump_dir = design_dir if conformer_dir != self.rosetta_inputs else self.user_defined_dir
+        self.motif_residue_attributes_df.to_csv(os.path.join(dump_dir, 'motif_residue_attributes.csv'), index=False)
 
-    def transform_residue_about_current_conformer(self, conformer_prody, residue, fragment=None, reference_conformer=None):
+    def transform_residue_about_current_conformer(self, conformer_prody, residue, fragment=None, reference_conformer=None, apply_mapping=False):
         """
         Transforms a given motif residue about a given conformer to maintain contact geometries with reference fragment
         as observed in PDB. (How to English?)
 
         :param conformer_prody: prody object of target conformer
         :param residue: prody object of motif residue to transform about conformer_prody
-        :param fragment: Name of current Fragment as string ('Fragment_1'). Uses entire ligand to determine constraint
-        atoms if None.
-        :param reference_conformer:
+        :param fragment: Path to PDB of current fragment. Uses entire ligand to determine constraint atoms if None.
+        :param reference_conformer: ligand conformer to use for determining transformation reference atoms
+        :param apply_mapping: maps fuzzball atom names onto ligand atoms in an existing complex
         :return:
         """
         # --- RIPPED FORM GENERATE_MOTIF_RESIDUES.GENERATE_FUZZBALL() --- #
@@ -1023,7 +955,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
         # Check whether current residue can be parsed using RDKit, skip if returns None
         if RDKit_Mol_from_ProDy(deepcopy_residue) is None:
             print(f'RDKit was unable to parse the current residue: {deepcopy_residue.getData("contact_source")[0]}')
-            return None
+            return None, None
 
         if not reference_conformer:
             reference_conformer = self.reference_conformer_prody
@@ -1034,6 +966,12 @@ class Generate_Fuzzball_using_PyRosetta(object):
         constraint_atoms_dict = self.generate_constraints.determine_constraint_atoms(deepcopy_residue,
                                                                                      reference_conformer,
                                                                                      fragment=fragment, verbose=False)
+
+        # todo: FIX _determine_next_residue_constraint_atoms()!!!!
+        if constraint_atoms_dict is False:
+            print(f'There was an issue determining residue contact atoms... sorry :|')
+            return None, None
+
         ligand_constraint_atoms = constraint_atoms_dict['ligand']['atom_names']
 
         # Select atoms from reference ligand conformer (conformer #1 e.g. MEH_0001)
@@ -1041,7 +979,11 @@ class Generate_Fuzzball_using_PyRosetta(object):
         reference_conformer_atoms = np.asarray(reference_conformer_coord_list)
 
         # Select atoms from current conformer
-        target_conformer_coord_list = [conformer_prody.select(f'name {atom}').getCoords()[0] for atom in ligand_constraint_atoms]
+        if apply_mapping:
+            target_conformer_coord_list = [conformer_prody.select(f'name {self.reference_complex_atomname_map[atom]}').getCoords()[0] for atom in ligand_constraint_atoms]
+            constraint_atoms_dict['ligand']['atom_names'] = [self.reference_complex_atomname_map[atom] for atom in ligand_constraint_atoms]
+        else:
+            target_conformer_coord_list = [conformer_prody.select(f'name {atom}').getCoords()[0] for atom in ligand_constraint_atoms]
         target_conformer_atoms = np.asarray(target_conformer_coord_list)
 
         transformation_matrix = Generate_Constraints.calculate_transformation_matrix(reference_conformer_atoms, target_conformer_atoms)
@@ -1053,7 +995,6 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         :param current_conformer: prody of current conformer
         :param current_conformer_fuzzball: current conformer prody to which defined residues will be added
-        :param offset: counter for residues added to fuzzball. ASSUMES there is only one ligand.
         :return:
         """
 
@@ -1061,7 +1002,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
             print(f'Working on {os.path.basename(os.path.normpath(defined_interaction))}...\n')
 
-            defined_interaction_prody= prody.parsePDB(defined_interaction)
+            defined_interaction_prody = prody.parsePDB(defined_interaction)
             defined_motif_residue = defined_interaction_prody.select('protein').copy()
             defined_ligand = defined_interaction_prody.select(f'resname {self.chemical_component_identifier}').copy()
 
@@ -1153,6 +1094,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
         :param iteration: prody atomgroup of minimum fuzzball definition pulled from a match
         :return:
         """
+
+        if iteration is None:
+            return current_conformer_fuzzball
+
         iteration_hv = iteration.getHierView()
         for residue in iteration_hv.iterResidues():
 
@@ -1169,7 +1114,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         return current_conformer_fuzzball
 
-    def assemble_fuzzball_for_existing_complex(self, existing_complex_path, complex_ligand_id=None):
+    def assemble_fuzzball_for_existing_complex(self, existing_complex_path, ligand_params, ligand_reference, complex_ligand_id=None, force_limit=False):
         """
         Map ligand atom names from a Rosetta params file onto the ligand atoms in an existing protein-ligand complex.
         This is required since the method uses the standardized param file atoms names to keep track of unique
@@ -1178,7 +1123,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
         I think I'm going to write this function as a wrapper for assemble_fuzzball()...
 
         Fuzzball creation for an existing complex will only happen (as far as I can tell) if I am attempting to design
-        around a ligand that has been placed throuhg docking (which we won't be doing) or if I want to benchmark binding
+        around a ligand that has been placed through docking (which we won't be doing) or if I want to benchmark binding
         site recovery for an already existing binding site (which we definitely will be doing). As a result, all of the
         files that I generate for a complex will be limited to that complex and can be stored in a single directory.
         All of the files for performing design will be self contained to this directory when calling
@@ -1199,92 +1144,97 @@ class Generate_Fuzzball_using_PyRosetta(object):
         :param existing_complex_path: path to PDB of the protein-ligand complex
         :param complex_ligand_id: use this identifier to select the ligand in the provided PDB. Defaults to use
         self.chemical_component_identifier
-        :param target_ligand_position: a single position or a list of positions in PDB numbering of ligands for which
-        fuzzballs will be built. Defaults to build fuzzballs for all ligands with the specified complex_ligand_id.
+        :param ligand_params: params file generated for ligand in the existing complex by molfile_to_params.py
+        :param ligand_reference: pdb file generated for ligand in existing complex by molfile_to_params.py
         """
 
         # --- Process input complex --- #
 
         existing_complex_prody = prody.parsePDB(existing_complex_path)
         protein_only_prody = existing_complex_prody.select('protein').toAtomGroup()
-        params_rotamers_coordsets = prody.AtomGroup('params_rotamers')
 
         # Clean protein-only portion of complex
-        clean_prody = clean_pdb(protein_only_prody)
+        clean_prody, removed_residues = clean_pdb(protein_only_prody)
 
-        ligand_selection_string = f'name {self.chemical_component_identifier if not complex_ligand_id else complex_ligand_id}'
+        ligand_selection_string = f'resname {self.chemical_component_identifier if not complex_ligand_id else complex_ligand_id}'
         existing_complex_ligands = existing_complex_prody.select(ligand_selection_string)
-        existing_complex_ligands_hv = existing_complex_ligands.getHierView()
 
-        if len(existing_complex_ligands_hv) == 0:
+        try:
+            existing_complex_ligands_hv = existing_complex_ligands.getHierView()
+        except FailedAssemblyError:
             raise FailedAssemblyError(f'No ligands with identifier "{complex_ligand_id}" exist in {existing_complex_path}')
 
-        reference_ligand = os.path.join(self.rosetta_inputs, f'{self.chemical_component_identifier}_0001.pdb')
-        reference_ligand_mol = RDKit_Mol_from_ProDy(reference_ligand, removeHs=False)
+        reference_ligand_prody = prody.parsePDB(ligand_reference)
+        reference_ligand_mol = RDKit_Mol_from_ProDy(reference_ligand_prody, removeHs=False)
 
-        # Create path to dump things
+        # Create paths to dump things
         new_design_name = os.path.basename(os.path.normpath(existing_complex_path)).split('.')[0]
-        new_design_path = os.path.join(self.user_defined_dir, 'Designs', new_design_name)
+        new_design_path = os.path.join(self.user_defined_dir, 'Design', new_design_name)
         os.makedirs(new_design_path, exist_ok=True)
+
+        conformer_dir = os.path.join(new_design_path, 'Conformers')
+        os.makedirs(conformer_dir, exist_ok=True)
+        shutil.copy2(ligand_params, conformer_dir)
+        shutil.copy2(ligand_reference, conformer_dir)
+
+        assert existing_complex_ligands_hv.numResidues() == 1
 
         # Use RDKit to map idealized ligand onto existing ligand atoms
         for complex_ligand in existing_complex_ligands_hv.iterResidues():
+
             complex_ligand_mol = RDKit_Mol_from_ProDy(complex_ligand, removeHs=False)
             ligand_mcs = rdFMCS.FindMCS([reference_ligand_mol, complex_ligand_mol], bondCompare=rdFMCS.BondCompare.CompareAny)
             ligand_mcs_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
 
             if complex_ligand_mol.GetNumHeavyAtoms() == ligand_mcs_mol.GetNumHeavyAtoms():
-                complex_ligand_match = complex_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
-                reference_ligand_match = reference_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
-                complex_reference_map = {com_idx: ref_idx for com_idx, ref_idx in zip(complex_ligand_match, reference_ligand_match)}
 
-                # Pull ligand from complex, rename atoms, but back into complex
-                # Need to figure out where to put conformer PDB though... assemble_fuzzball() expects it to be in Rosetta_Inputs
-                for com_idx, ref_idx in complex_reference_map.items():
-                    # Get reference atom name for current ref_idx
-                    ref_atomname = reference_ligand_match.GetAtomWithIdx(ref_idx).GetMonomerInfo().GetName().strip()
-                    # Apply name to complex_ligand_renamed
-                    complex_ligand_match.GetAtomWithIdx(com_idx).GetMonomerInfo().SetName(ref_atomname)
+                # Align ligand_ref onto existing complex_ligand
+                ligand_ref_no_H = reference_ligand_prody.select('not hydrogen').copy()
+                ligand_complex_no_H = complex_ligand.select('not hydrogen').copy()
+                transformation_matrix = prody.calcTransformation(ligand_ref_no_H, ligand_complex_no_H)
+                prody.applyTransformation(transformation_matrix, reference_ligand_prody)
 
-                # Convert renamed Mol to Prody object
-                complex_ligand_renamed_PDBBlock = complex_ligand_match.MolToPDBBlock()
-                complex_ligand_renamed_prody = prody.parsePDBStream(io.StringIO(complex_ligand_renamed_PDBBlock))
+                # Remove old ligand from complex and replace with ligand generated by molfile_to_params.py
+                append_ligand_resnum = clean_prody.numResidues() + 1
+                reference_ligand_prody.setResnums([append_ligand_resnum] * len(reference_ligand_prody))
+                reference_ligand_prody.setChids(['X'] * len(reference_ligand_prody))
+                clean_prody += reference_ligand_prody
 
-                # Remove old ligand from complex and replace with renamed version
-                append_ligand_resnum = clean_prody.numResidues()
-                complex_ligand_renamed_prody.setResnum(append_ligand_resnum)
-                clean_prody += complex_ligand_renamed_prody
-
-                # Dump current ligand and add to coordset
-                prody.writePDB(os.path.join(new_design_path, f'{self.chemical_component_identifier}_0000_{append_ligand_resnum}.pdb'), complex_ligand_renamed_prody)
-                # todo: do rotamers need to be aligned in some way? Or can they just be wherever?
-                params_rotamers_coordsets.addCoordset(complex_ligand_renamed_prody)
+            else:
+                raise Exception('Unable to map reference ligand onto complex ligand!')
 
         # Dump clean scaffold complex
         clean_pdb_path = os.path.join(new_design_path, f'{os.path.basename(os.path.normpath(existing_complex_path)).split(".")[0]}-clean.pdb')
         prody.writePDB(clean_pdb_path, clean_prody)
 
         # Copy reference params file, write rotamers to file, and append PDB_CONFORMER flag
-        source_params = os.path.join(self.rosetta_inputs, f'{self.chemical_component_identifier}_0001.params')
-        dest_params = os.path.join(new_design_path, f'{self.chemical_component_identifier}-{new_design_name}.params')
-        shutil.copy2(source_params, dest_params)
-
-        params_rotamers = f'{self.chemical_component_identifier}_rotamers.pdb'
-        prody.writePDB(params_rotamers, params_rotamers_coordsets)
-
-        with open(dest_params, 'a') as params:
-            params.write(f'PDB_ROTAMERS {params_rotamers}')
+        # source_params = os.path.join(self.rosetta_inputs, f'{self.chemical_component_identifier}_0001.params')
+        # dest_params = os.path.join(conformer_dir, f'{self.chemical_component_identifier}.params')
+        # shutil.copy2(source_params, dest_params)
 
         # --- Perform assembly --- #
 
-        for ligand in clean_prody.select(f'resname {self.chemical_component_identifier}').getAtomGroup().iterResidues():
-            ligand_pdb_path = os.path.join(new_design_path, f'{self.chemical_component_identifier}_0000_{ligand.getResnum()}.pdb')
-            iteration_dict = {'minimum_definition': prody.AtomGroup(), 'match_path': clean_pdb_path}
-            self.assemble_fuzzball(ligand_pdb_path, iteration=iteration_dict)
+        # Make self-contained directory for fuzzball-related stuff
+        actual_fuzzball_dir = os.path.join(self.fuzzball_dir, 'Fuzzballs')
+        os.makedirs(actual_fuzzball_dir, exist_ok=True)
 
+        for ligand in clean_prody.select(f'resname {self.chemical_component_identifier}').getHierView().iterResidues():
+            iteration_dict = {'minimum_definition': None, 'match_path': clean_pdb_path}
+            local_ligand_reference = os.path.join(conformer_dir, os.path.basename(ligand_reference))
+            fuzzball_path = self.assemble_fuzzball(local_ligand_reference, iteration=iteration_dict, existing=True, existing_params=ligand_params, force_limit=force_limit)
 
-    def assemble_fuzzball(self, conformer_path, add_user_defined_motifs=True, fuzzball_limit=2000, hbond_limit=250,
-                          iteration=None, iteration_name=None, iteration_index=0, fuzzball_index=0):
+            # Move fuzzball-related stuff into a self-contained directory
+            fuzzball_identifier = os.path.basename(fuzzball_path)[:-4]
+            fuzzball_identifier_split = fuzzball_identifier.split('-')
+            shutil.move(fuzzball_path, actual_fuzzball_dir)
+            shutil.move(os.path.join(self.fuzzball_dir, f'{fuzzball_identifier}.ag.npz'), actual_fuzzball_dir)
+            shutil.move(os.path.join(self.fuzzball_dir, f'{fuzzball_identifier}.csv'), actual_fuzzball_dir)
+            shutil.move(os.path.join(self.fuzzball_dir, f'{fuzzball_identifier_split[1]}-{fuzzball_identifier_split[2]}-match_residue_map.pickle'), actual_fuzzball_dir)
+
+    # todo: fuzzball assembly for an existing complex uses options from iteration...
+    def assemble_fuzzball(self, conformer_path, add_user_defined_motifs=False, fuzzball_limit=5000, hbond_limit=500,
+                          iteration=None, iteration_name=None, iteration_index=0, fuzzball_index=0, existing=False,
+                          existing_params=None, force_limit=False):
         """
         Yiss.
 
@@ -1298,6 +1248,9 @@ class Generate_Fuzzball_using_PyRosetta(object):
         :param iteration_name:
         :param iteration_index:
         :param fuzzball_index:
+        :param existing: building a fuzzball for an existing complex
+        :param existing_params: path to params file for ligand in the existing complex
+        :param force_limit: force iterations to obey motif limits
         :return:
         """
 
@@ -1305,7 +1258,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
         # Initialize Conformer and Available Motif Residues #
         #####################################################
 
-        current_conformer_name = os.path.basename(os.path.normpath(conformer_path)).split('.')[0]
+        design_dir, current_conformer_path = os.path.split(conformer_path)
+        current_conformer_name = current_conformer_path.split('.')[0]
 
         # Load current conformer and motif_residue_attributes_csv
         current_conformer = prody.parsePDB(conformer_path)
@@ -1314,13 +1268,40 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         # Import previously generated motif_residue_attributes_df, else generate it
         motif_residue_attributes_csv = os.path.join(self.user_defined_dir, 'motif_residue_attributes.csv')
-        if os.path.exists(motif_residue_attributes_csv):
+        design_csv = os.path.join(design_dir, '..', 'motif_residue_attributes.csv')
+
+        # If assembling for an existing complex, map complex conformer onto Rosetta_Inputs conformers
+        # molfile_to_params does not assign atom names in a consistent manner...
+        if existing:
+            complex_ligand_mol = RDKit_Mol_from_ProDy(current_conformer, removeHs=False)
+            reference_ligand_mol = RDKit_Mol_from_ProDy(self.reference_conformer_prody, removeHs=False)
+
+            ligand_mcs = rdFMCS.FindMCS([reference_ligand_mol, complex_ligand_mol], bondCompare=rdFMCS.BondCompare.CompareAny)
+            ligand_mcs_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
+
+            complex_mol_match = complex_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
+            reference_mol_match = reference_ligand_mol.GetSubstructMatch(ligand_mcs_mol)
+
+            reference_complex_atomname_map = dict()
+            for complex_idx, reference_idx in zip(complex_mol_match, reference_mol_match):
+                complex_atomname = complex_ligand_mol.GetAtomWithIdx(complex_idx).GetMonomerInfo().GetName()
+                reference_atomname = reference_ligand_mol.GetAtomWithIdx(reference_idx).GetMonomerInfo().GetName()
+                reference_complex_atomname_map[reference_atomname.strip()] = complex_atomname.strip()
+                
+            self.reference_complex_atomname_map = reference_complex_atomname_map
+
+        # Prepare motif score dataframe
+        if existing and os.path.exists(design_csv):
+            print('motif_residue_attributes.csv for design found...\n')
+            self.motif_residue_attributes_df = pd.read_csv(design_csv)
+
+        elif not existing and os.path.exists(motif_residue_attributes_csv):
             print('motif_residue_attributes.csv found...\n')
             self.motif_residue_attributes_df = pd.read_csv(motif_residue_attributes_csv)
-
         else:
             print('motif_residue_attributes.csv not found, generating it now...\n')
-            self.score_motif_conformer_interactions()
+            conformer_dir = design_dir if existing else None
+            self.score_motif_conformer_interactions(conformer_dir=conformer_dir, apply_mapping=existing)
 
         ###############################################
         # Add user-defined motif residues to fuzzball #
@@ -1336,11 +1317,16 @@ class Generate_Fuzzball_using_PyRosetta(object):
         elif add_user_defined_motifs and os.path.exists(defined_interactions_dir):
             current_conformer_fuzzball = self.minimum_fuzzball_definition(current_conformer, current_conformer_fuzzball)
             match_pdb = None
+        # todo: streamline this
+        else:
+            match_pdb = None
 
-        my_options = [f"-extra_res_fa {os.path.join(self.rosetta_inputs, f'{current_conformer_name}.params')}",
-                      "-mute core.conformation core.chemical",
-                      '-ex1 -ex2 -ex3 -ex4 -extrachi_cutoff 0',
-                      '-packing:ex1:level 7 -packing:ex2:level 7 -packing:ex3:level 7 -packing:ex4:level 7']
+        # Set params path
+        params_path = existing_params if existing else os.path.join(self.rosetta_inputs, f'{current_conformer_name}.params')
+
+        my_options = [f"-extra_res_fa {params_path}",
+                      "-mute core.conformation core.chemical core.pack",
+                      '-extrachi_cutoff 0']
         pyrosetta.init(options=' '.join(my_options))
 
         # Import minimum fuzzball prody (ligand + user-defined residues) as pose
@@ -1377,7 +1363,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
             # Get ligand from match, always last residue
             match_pose_size = match_pose.size()
             match_ligand = match_pose.residue(match_pose_size)
-            conformer_name, motif_resnums = find_conformer_and_constraint_resnums(os.path.basename(os.path.normpath(match_pdb)))
+            if existing:
+                motif_resnums = list()
+            else:
+                motif_resnums = find_constraint_resnums(match_pdb)
 
             # Keep track of match positions and compatible residue identites
             match_residue_map = {position: dict() for position in range(1, match_pose.size())}  # Assumes one ligand appended to end of sequence
@@ -1424,14 +1413,14 @@ class Generate_Fuzzball_using_PyRosetta(object):
             # Motif residues added to fuzzball
             added = 0
 
-            for motif_residue in motif_residue_list_untransformed:
+            for motif_residue in self.pull_relevant_motif_residues_from_clusters(motif_residue_list_untransformed):
 
                 if len(set(motif_residue.getAltlocs())) > 1:
-                    print(motif_residue.getData("contact_source")[0])
-                    print(motif_residue.getAltlocs())
+                    # print(motif_residue.getData("contact_source")[0])
+                    # print(motif_residue.getAltlocs())
                     continue
 
-                motif_residue_transformed, constraint_atoms_dict = self.transform_residue_about_current_conformer(current_conformer, motif_residue)
+                motif_residue_transformed, constraint_atoms_dict = self.transform_residue_about_current_conformer(current_conformer, motif_residue, apply_mapping=existing)
 
                 # --- Redundant residue check --- #
 
@@ -1467,7 +1456,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         all([res_contact_atoms_match, ligand_contact_atom_match, contact_atoms_rmsd, ca_distance]))
 
                 if any(truthiness_list):
-                    # print(f'\n{motif_residue_transformed.getData("contact_source")[0]} was found to be redundant!\n')
+                    print(f'\n{motif_residue_transformed.getData("contact_source")[0]} was found to be redundant!\n')
                     continue
 
                 # --- Minimum fuzzball compatibility check --- #
@@ -1499,19 +1488,17 @@ class Generate_Fuzzball_using_PyRosetta(object):
                 # Only accept residues that do not clash with the minimum motif
                 # Only score motif-ligand edge during iteration since inverse rotamers may be compatible
                 if iteration:
-                    if interaction_energies[0] > 0.25:
+                    if interaction_energies[0] > 25:
                         print(f'{motif_residue_transformed.getData("contact_source")[0]} clashes with the ligand!')
                         continue
                 else:
-                    if any([e > 0.25 for e in interaction_energies]):
+                    if any([e > 25 for e in interaction_energies]):
                         print(f'{motif_residue_transformed.getData("contact_source")[0]} clashes with a defined residue!\n')
                         continue
 
                 # --- Inverse Rotamer Match Compatability Filter --- #
 
                 if iteration:
-
-                    accept_current_motif = False
 
                     # Keep track of match positions that can accommodate current residue identity
                     compatible_match_positions = set()
@@ -1530,8 +1517,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                     # --- Try fuzzball conformer --- #
 
                     # Get all nearby backbone positions in match
-                    match_neighbors = [position for position in range(1, match_pose_size) if pyrosetta_motif_residue.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 6]
-                    print(match_neighbors)
+                    match_neighbors = [position for position in range(1, match_pose_size) if pyrosetta_motif_residue.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 10]
 
                     # Test current motif rotamer against match neighbors
                     motif_bb_atoms = pyrosetta_motif_residue.mainchain_atoms()
@@ -1544,7 +1530,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         mainchain_rmsd = prody.calcRMSD(match_mainchain_coords, motif_mainchain_coords)
 
                         if mainchain_rmsd < 2:
-                            accept_current_motif = True
+                            compatible_match_positions.add(match_position)
 
                     # --- Try other conformers --- #
 
@@ -1576,7 +1562,6 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         # --- Repeat code, but whatever --- #
 
                         match_neighbors = [position for position in range(1, match_pose_size) if sample_motif_rotamers.xyz('CA').distance(match_pose.residue(position).xyz('CA')) < 4]
-                        print(match_neighbors)
 
                         # Test current motif rotamer against match neighbors
                         motif_bb_atoms = sample_motif_rotamers.mainchain_atoms()
@@ -1590,7 +1575,16 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
                             if mainchain_rmsd < 2:
                                 compatible_match_positions.add(match_position)
-                                accept_current_motif = True
+
+                    if len(compatible_match_positions) > 0:
+                        print(f'{motif_residue_transformed.getData("contact_source")[0]} cannot be accommodated by the current match!\n')
+                        continue
+
+                    # Use matcher 6-DOFs to determine accepted rotamers for rotamerset generation
+                    dof_tuple, constraint_atoms_dict = self.generate_constraints.calculate_matcher_dofs(motif_residue_transformed, current_conformer)
+                    contact_info = [current_motif_coord_list, [float(a) for a in dof_tuple],
+                                    constraint_atoms_dict['residue']['atom_names'],
+                                    constraint_atoms_dict['ligand']['atom_names']]
 
                     # Add residue identity to residue_match_mapping
                     for position in compatible_match_positions:
@@ -1600,18 +1594,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         if new_resname in ['C', 'P', 'G']:
                             continue
 
-                        # contact_info = ((atm_1, atm_2, atm_3), [list(pyrosetta_motif_residue.xyz(atm_1)), list(pyrosetta_motif_residue.xyz(atm_2)), list(pyrosetta_motif_residue.xyz(atm_3))])
-                        contact_info = ((atm_1, atm_2, atm_3), current_motif_coord_list)
-                        # contact_info = ((atm_1, atm_2, atm_3), motif_residue_transformed)
-
                         if new_resname in match_residue_map[position].keys():
                             match_residue_map[position][new_resname].append(contact_info)
                         else:
                             match_residue_map[position][new_resname] = [contact_info]
-
-                    if not accept_current_motif:
-                        print(f'{motif_residue_transformed.getData("contact_source")[0]} cannot be accommodated by the current match!\n')
-                        continue
 
                 # --- Add residue to fuzzball if all filters are passed --- #
 
@@ -1631,19 +1617,15 @@ class Generate_Fuzzball_using_PyRosetta(object):
                                                             current_motif_ligand_contact,
                                                             current_motif_coords,
                                                             current_motif_ca))
-
                 added += 1
 
-                if added >= limit:
+                if (force_limit or not iteration) and added >= limit:
                     break
 
             return current_conformer_fuzzball, resnum_count
 
         # Apply banned residue filter to motif_residue_attributes_df
         banned_resnames = {'ALA', 'GLY', 'PRO', 'CYS'}
-        if iteration:
-            banned_resnames = banned_resnames.union({ 'GLN', 'ASN', 'GLU', 'ASP', 'ARG'})
-
         working_resnames = list(set(self.resnames) - banned_resnames)
         self.motif_residue_attributes_df = self.motif_residue_attributes_df[self.motif_residue_attributes_df['resname'].isin(working_resnames)]
 
@@ -1660,9 +1642,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         for contact_atom in self.hbond_atom_set:
             contacts_df = current_conformer_motifs_by_contact.get_group(contact_atom)
-            hbond_contacts_df = contacts_df[(contacts_df['hbond_sc'] < 0) & (contacts_df['total_score'] < 0)].sort_values(by=['total_score'])
-            motif_residues_for_current_contact = list(hbond_contacts_df['contact_source'].values)
-            motif_prody_list = self.pull_relevant_motif_residues_from_clusters(motif_residues_for_current_contact)
+            hbond_contacts_df = contacts_df[((contacts_df['hbond_sc'] < 0) | (contacts_df['hbond_bb_sc'] < 0)) & (contacts_df['total_score'] < 25)].sort_values(by=['total_score'])
+            motif_prody_list = list(hbond_contacts_df['contact_source'].values)
             print(f'Considering {len(motif_prody_list)} residues for contact atom {contact_atom}...\n')
 
             current_conformer_fuzzball, resnum_count = add_motif_residues_to_current_fuzzball(current_conformer_fuzzball, motif_prody_list, resnum_count, iteration=iteration, limit=hbond_limit)
@@ -1679,20 +1660,16 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         for contact_atom in packed_atoms:
             contacts_df = current_conformer_motifs_by_contact.get_group(contact_atom)
-            packing_contacts_df = contacts_df[(contacts_df['hbond_sc'] == 0) & (contacts_df['total_score'] < 0)].sort_values(by=['total_score'])
-
-            motif_residues_for_current_contact = list(packing_contacts_df['contact_source'].values)
-            motif_prody_list = self.pull_relevant_motif_residues_from_clusters(motif_residues_for_current_contact)
+            packing_contacts_df = contacts_df[(contacts_df['hbond_sc'] == 0) & (contacts_df['total_score'] < 25)].sort_values(by=['total_score'])
+            motif_prody_list = list(packing_contacts_df['contact_source'].values)
 
             current_conformer_fuzzball, resnum_count = add_motif_residues_to_current_fuzzball(current_conformer_fuzzball, motif_prody_list, resnum_count, iteration=iteration, limit=calculated_limit)
 
         # --- Output fuzzballs --- #
 
         if match_pdb:
-            # todo: UPDATE THIS TO REFLECT CURRENT SETUP
             match_residue_map_curated = {int(key): value for key, value in match_residue_map.items() if len(value.keys()) > 0 and key not in motif_resnums}
-
-            with open(os.path.join(self.fuzzball_dir, f'fuzz_{fuzzball_index}-match_residue_map.pickle'), 'wb') as match_residue_pickle:
+            with open(os.path.join(self.fuzzball_dir, f'iter_{iteration_index}-fuzz_{fuzzball_index}-match_residue_map.pickle'), 'wb') as match_residue_pickle:
                 pickle.dump(match_residue_map_curated, match_residue_pickle)
 
         fuzzball_name = iteration_name if iteration_name else current_conformer_name
@@ -1710,7 +1687,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         # Motif residue summary dataframe
         fuzzball_id_list = [motif.getData('contact_source')[0] for motif in current_conformer_fuzzball.iterResidues()]
-        motif_residue_summary_df = self.motif_residue_attributes_df[self.motif_residue_attributes_df['contact_source'].isin(fuzzball_id_list)]
+        motif_residue_summary_df = self.motif_residue_attributes_df[(self.motif_residue_attributes_df['contact_source'].isin(fuzzball_id_list)) & (self.motif_residue_attributes_df['conformer'] == current_conformer_name)]
 
         # Left join to add resnums
         fuzzball_resnums = [{'resnum': res.getResnum(), 'contact_source': res.getData('contact_source')[0]} for res in
@@ -1734,11 +1711,11 @@ class Generate_Fuzzball_using_PyRosetta(object):
         fragment_cluster_set = set()
         for id_string in unique_motif_id_set:
             id_string_split = re.split('[_-]', id_string)
-            fragment_cluster_set.add((int(id_string_split[1]), int(id_string_split[3])))
+            fragment_cluster_set.add((int(id_string_split[1]), int(id_string_split[3]), int(id_string_split[4])))
 
-        for fragment, cluster in fragment_cluster_set:
+        for fragment, cat_cluster, cluster in fragment_cluster_set:
 
-            current_cluster = self.cluster_dict[f'Fragment_{fragment}'][cluster]
+            current_cluster = self.cluster_dict[f'Fragment_{fragment}'][cat_cluster][cluster]
             residues_in_cluster = set(current_cluster.getData('contact_source'))
             residues_to_pull = residues_in_cluster & set(unique_motif_id_set)
 
@@ -1748,9 +1725,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
                 pulled_residue_prody = current_cluster.select(f'contact_source {selection_string}').getHierView()
 
                 for residue in pulled_residue_prody.iterResidues():
-                    motif_residue_list_untransformed.append(residue.copy())
+                    yield residue.copy()
+                    # motif_residue_list_untransformed.append(residue.copy())
 
-        return motif_residue_list_untransformed
+        # return motif_residue_list_untransformed
 
     # todo: actually use this somewhere...
     def validate_user_defined_fuzzball_residues(self):
