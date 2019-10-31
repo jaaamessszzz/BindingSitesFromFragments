@@ -26,7 +26,7 @@ class Cluster(object):
     def __init__(self, processed_PDBs_dir):
         self.processed_PDBs_dir = processed_PDBs_dir
         self.pdb_object_list = self._import_pdbs()
-        self.distance_cutoff = 1 - np.cos(30 * np.pi / 180)  # Maximum of 30 degree deviation between contacts within a cluster
+        self.distance_cutoff = 1 - np.cos(20 * np.pi / 180)  # Maximum of 20 degree deviation between clusters
         self.clusters = dict()
         self.df = None
 
@@ -58,6 +58,9 @@ class Cluster(object):
 
             pdb_info = os.path.basename(os.path.normpath(pdb))
             prody_ligand = prody.parsePDB(pdb).select('hetatm and resname {}'.format(pdb_info.split('_')[1]))
+
+            # todo: CATCH THIS!!!
+            if prody_ligand is None: continue
 
             # Iterate over residues in contacts and generate representative vector with weights applied
             processsed_residue_list += [fragment_PDB(residue, pdb_info, prody_ligand,) for residue in prody_protein_hv.iterResidues()]
@@ -119,10 +122,7 @@ class Cluster(object):
 
             if len(vector_array) > 1:
                 cosine_distances = pdist(np.asarray(vector_array), metric='cosine')
-
-                pprint(cosine_distances)
-
-                Z = linkage(cosine_distances, method='ward')
+                Z = linkage(cosine_distances, method='average')
                 clusters = fcluster(Z, self.distance_cutoff, criterion='distance')
                 self.clusters[category] = [(cluster, residue) for cluster, residue in zip(clusters, category_contacts)]
 
@@ -163,10 +163,9 @@ class Cluster(object):
 
                 # todo: simplify this jankiness
                 cluster_residues = list(cluster_residues)
-                print(cluster_residues)
 
                 # Generate report on cluster qualities
-                dict_list.append(self.generate_report_row(cluster_residues, cluster))
+                dict_list.append(self.generate_report_row(cluster_residues, f'{cluster_count}-{cluster}'))
 
                 # Add PDB sources to source_pdb_dict
                 cluster_source_list = [res[1].pdb_info.split(".")[0].split('_')[0] for res in cluster_residues]
@@ -186,7 +185,7 @@ class Cluster(object):
                         residue_atomgroup = res.prody_residue.copy()
                         contact_source_filename = res.pdb_info.split(".")[0]
                         contact_source_pdbid = contact_source_filename.split('_')[0]
-                        residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{contact_source_filename}'
+                        residue_source_string = f'F_{int(fragment_number)}-C_{int(cluster_count)}_{int(cluster)}-{res.prody_residue.getResname()}_{res.prody_residue.getResnum()}-{contact_source_filename}'
 
                         residue_atomgroup.setData('contact_source', [residue_source_string for atom in residue_atomgroup])
                         residue_atomgroup.setData('source_PDB', [contact_source_pdbid for atom in residue_atomgroup])
@@ -208,6 +207,7 @@ class Cluster(object):
                     prody.saveAtoms(cluster_ensemble, filename=os.path.join(fragment_cluster_path, f'Cluster_{cluster_count}_{cluster}'))
 
                     # Write pdb
+                    # todo: each residue should be in its own coordset (for visualization!!!)
                     prody.writePDB(os.path.join(fragment_cluster_path, f'Cluster_{cluster_count}_{cluster}'), cluster_ensemble)
 
                 else:
