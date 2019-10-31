@@ -29,7 +29,7 @@ def mc_solve(args):
 
 
     Usage:
-      bsff mcsolve <user_defined_dir> <current_iteration_fuzzball_dir> <motif_size> [--block=<block_size>]
+      bsff mcsolve <user_defined_dir> <current_iteration_fuzzball_dir> <motif_size> [options]
 
     Arguments:
       <user_defined_dir>                        Path to project root directory
@@ -38,6 +38,7 @@ def mc_solve(args):
 
     Options:
       --block=<block_size>, -b <block_size>     If running on the cluster, number of trajectories per fuzzball
+      --include_defined, -i                     Included defined residues
     """
     from ..solve import montecarlo_motif
     user_defined_dir = args['<user_defined_dir>']
@@ -49,6 +50,7 @@ def mc_solve(args):
 
     # todo: configure for both cluster and user-defined inputs
     task_id = 0
+    include_defined = args['--include_defined']
     block_count = None
     if os.environ.get("SGE_TASK_ID"):
         if args['--block']:
@@ -62,10 +64,10 @@ def mc_solve(args):
         print(os.environ)
         print(task_id)
 
-    if block_count is None:
-        print('block_count is None...')
-        raise SystemExit
+        if block_count is None:
+            print('block_count is None...')
+            raise SystemExit
 
     # Select a fuzzball
     fuzzball_path = fuzzballs[task_id]
-    montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=block_count)
+    montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=block_count, include_defined=include_defined)

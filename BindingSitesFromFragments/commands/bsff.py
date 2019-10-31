@@ -47,6 +47,7 @@ def main():
                            'mcsolve',
                            'crystallize',
                            'benchmark',
+                           'design'
                            ]
 
     if len(argv) == 0 or argv[0] not in registered_commands:
@@ -89,6 +90,10 @@ def main():
     if argv[0] == 'crystallize':
         from .bsff_assemble import crystallize
         crystallize(docopt(crystallize.__doc__, argv=argv))
+
+    if argv[0] == 'design':
+        from .bsff_design import design
+        design(docopt(design.__doc__, argv=argv))
 
     # If benchmark, pass things off to benchmark manager
     if argv[0] == 'benchmark':

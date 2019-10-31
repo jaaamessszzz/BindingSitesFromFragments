@@ -30,14 +30,16 @@ def constraints(args):
       -j, --json                                        Dump constraints into a JSON file
     """
     from ..motifs import Generate_Constraints
-    generate_constraints = Generate_Constraints(args['<user_defined_dir>'])
+    chemical_component_identifier = os.path.basename(os.path.normpath(args['<user_defined_dir>']))[:3]
+    generate_constraints = Generate_Constraints(chemical_component_identifier)
 
     tolerance = int(args['--tolerance']) if args['--tolerance'] else 5
     samples = int(args['--sample']) if args['--sample'] else 1
     constraints_to_generate = int(args['--constraints-to-generate']) if args['--constraints-to-generate'] else 100000
     offset = int(args['--offset']) if args['--offset'] else 0
 
-    generate_constraints.conventional_constraints_from_gurobi_solutions(args['<gurobi_solutions_csv_dir>'],
+    generate_constraints.conventional_constraints_from_gurobi_solutions(args['<user_defined_dir>'],
+                                                                        args['<gurobi_solutions_csv_dir>'],
                                                                         args['<fuzzball_dir>'],
                                                                         constraints_to_generate=constraints_to_generate,
                                                                         offset=offset,
