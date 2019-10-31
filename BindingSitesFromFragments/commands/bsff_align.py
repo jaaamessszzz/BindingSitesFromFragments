@@ -24,8 +24,6 @@ def align(args):
     use_local_pdb_database = args['--use_local_pdb_database']
     verify_substructure = not args['--skip_substruture_verification']
 
-    print(verify_substructure)
-
     # Verify local database exists
     if use_local_pdb_database and not os.path.exists(use_local_pdb_database):
         raise Exception(f'Local PDB root directory {use_local_pdb_database} does not exist!')

@@ -21,6 +21,11 @@ from rdkit import DataStructs
 from rdkit.Chem import rdFMCS
 from rdkit.Chem.Fingerprints import FingerprintMols
 
+# DEBUGGING
+from rdkit.Chem import Draw
+from rdkit.Chem.Draw.MolDrawing import MolDrawing, DrawingOptions
+DrawingOptions.includeAtomNumbers = True
+
 from .utils import *
 from .motifs import Generate_Constraints
 
@@ -63,7 +68,6 @@ class Align_PDB_Factory(object):
 
         # Create directory for processed PDBs
         rejected_dict = self.load_previously_rejected_pdbs()
-        pprint(rejected_dict)
 
         # Create directories...
         if not use_local_pdb_database:
@@ -92,10 +96,11 @@ class Align_PDB_Factory(object):
 
             # Create directory for processed PDBs
             processed_dir = os.path.join(self.processed_PDBs_path, current_fragment)
+            processed_dir_exists = os.path.exists(processed_dir)
             os.makedirs(processed_dir, exist_ok=True)
 
             # Get list of already processed PDBs for current_fragment
-            already_processed_pdbs = [file[:4].upper() for file in os.listdir(processed_dir)]
+            already_processed_pdbs = [file[:4].lower() for file in os.listdir(processed_dir)]
 
             # Save ideal_ligand_containers for each fragment so things are only downloaded once
             ideal_ligand_dict = dict()
@@ -105,19 +110,21 @@ class Align_PDB_Factory(object):
             # Align_PDB class holds all information for the current fragment
             align = Align_PDB(self.user_defined_dir, current_fragment, self.sanitized_smiles_dict[current_fragment], verify_substructure=verify_substructure)
 
+            # Get PDB IDs that are viable for extracting protein-fragment contacts
+            reject_pdbs = rejected_dict[current_fragment] if current_fragment in rejected_dict.keys() else list()
+            if not processed_dir_exists:
+                reject_pdbs = list()
+            reject_pdbs.append('3k87')  # DEBUGGING
+
+            viable_pdbs = list(set(self.pdb_ligand_json[current_fragment]['PDBs']) - set(reject_pdbs) - set(already_processed_pdbs))
+
             # For each PDB containing a fragment-containing compound
-            for pdbid in self.pdb_ligand_json[current_fragment]['PDBs']:
+            for pdbid in viable_pdbs:
 
                 # Return path of PDB file to use for processing
                 found_pdb, pdb_path = self.return_PDB_to_use_for_alignments(pdbid, use_local_pdb_database=use_local_pdb_database)
 
                 if not found_pdb:
-                    continue
-
-                if pdbid in already_processed_pdbs:
-                    continue
-
-                if current_fragment in rejected_dict.keys() and pdbid in rejected_dict[current_fragment]:
                     continue
 
                 # Proceed with processing if the current PDB passes all filters
@@ -218,8 +225,8 @@ class Align_PDB_Factory(object):
                             else:
                                 rejected_dict[current_fragment] = [pdbid]
 
-            else:
-                print('{} has been processed!'.format(pdbid))
+            # else:
+            #     print('{} has been processed!'.format(pdbid))
 
         # Remember rejected PDBs
         with open(self.rejected_dict_pickle, 'wb') as reject_pickle:
@@ -352,22 +359,16 @@ class Align_PDB(object):
 
         # RDKit Mol representations of fragment
         self.fragment_ideal_rdkit_mol = Chem.MolFromSmiles(self.fragment_smiles_sanitized)
+        if self.fragment_ideal_rdkit_mol is None:
+            print('Unable to parse SMILES from Fragment_Inputs.csv, generating fragment Mol from file!')
+            try:
+                fragment_pdb_path = os.path.join(self.fragment_inputs_path, f'{current_fragment}.pdb')
+                self.fragment_ideal_rdkit_mol = Chem.MolFromPDBFile(fragment_pdb_path)
+                print(Chem.MolToSmiles(self.fragment_ideal_rdkit_mol))
+            except Exception as e:
+                print(e)
+
         self.fragment_pdb_rdkit_mol = Chem.MolFromPDBBlock(self.fragment_string, removeHs=False)
-
-        # --- Fragment Mapping options --- #
-        self.verify_substructure = verify_substructure
-        reference_ligand_heavyatom_neighbors_temp_ = dict()
-
-        if verify_substructure:
-            # Reference ligand RDKit Mol
-            reference_ligand_path = os.path.join(self.rosetta_inputs_path, f'{os.path.basename(user_defined_dir)[:3]}_0001.pdb')
-            reference_ligand_rdkit_mol = Chem.MolFromPDBFile(reference_ligand_path, removeHs=True)
-
-            for heavyatom in reference_ligand_rdkit_mol.GetAtoms():
-                heavyatom_name = heavyatom.GetMonomerInfo().GetName().strip()
-                reference_ligand_heavyatom_neighbors_temp_[heavyatom_name] = len(heavyatom.GetNeighbors())
-
-        self.reference_ligand_heavyatom_neighbors = reference_ligand_heavyatom_neighbors_temp_
 
         # Assert that mol objects were loaded properly
         assert not any([self.fragment_pdb_rdkit_mol is None, self.fragment_ideal_rdkit_mol is None])
@@ -375,6 +376,28 @@ class Align_PDB(object):
         # --- Run initialization functions --- #
 
         self._init_map_fragment_smiles_onto_ideal()
+
+        # --- Fragment Mapping options --- #
+
+        self.verify_substructure = verify_substructure
+
+        if verify_substructure:
+            reference_ligand_path = os.path.join(self.rosetta_inputs_path, f'{os.path.basename(user_defined_dir)[:3]}_0001.pdb')
+            self.reference_ligand_rdkit_mol = Chem.MolFromPDBFile(reference_ligand_path, removeHs=True)
+
+            # Map ref_fragment_index > ref_fragment name > ref_ligand name > ref_ligand degree
+            ref_ligand_atomname_degree_map = {atom.GetMonomerInfo().GetName(): atom.GetDegree() for atom in self.reference_ligand_rdkit_mol.GetAtoms()}
+            self.pdbfrag_refdegree_map = dict()
+
+            for ideal_idx, pdb_idx in self.ideal_fragment_mapping.items():
+
+                fragment_pdb_atom = self.fragment_pdb_rdkit_mol.GetAtomWithIdx(pdb_idx)
+                fragment_pdb_atom_name = fragment_pdb_atom.GetMonomerInfo().GetName()
+                self.pdbfrag_refdegree_map[pdb_idx] = ref_ligand_atomname_degree_map[fragment_pdb_atom_name]
+
+                # print(ideal_idx, pdb_idx, fragment_pdb_atom_name, ref_ligand_atomname_degree_map[fragment_pdb_atom_name])
+
+            # pprint(self.pdbfrag_refdegree_map)
 
     def _init_map_fragment_smiles_onto_ideal(self):
         """
@@ -392,7 +415,7 @@ class Align_PDB(object):
         # Assert 1:1 mapping excluding hydrogens
         assert len(fragment_ideal_match) == len(fragment_pdb_match)
 
-        self.ideal_fragment_mapping = {i_idx: p_idx for i_idx, p_idx in zip(fragment_ideal_match, fragment_pdb_match)}
+        self.ideal_fragment_mapping = {i_idx: p_idx for i_idx, p_idx in zip(fragment_ideal_match, fragment_pdb_match) if self.fragment_pdb_rdkit_mol.GetAtomWithIdx(p_idx).GetAtomicNum() != 1}
 
     def extract_ligand_records(self, pdb_file, relevant_ligands):
         """
@@ -505,10 +528,8 @@ class Align_PDB(object):
             print('\nUnable to load ligand PDB as an RDKit mol object...\n')
             return False, None
 
-        # I need to generalize bond types since importing mol from a PDB fucks up valence information and things don't
+        # I need to generalize bond types since importing mol from a PDB messes up valence information and things don't
         # map properly: https://github.com/rdkit/rdkit/issues/943
-
-        # todo: convert this into a static method so I can use it in Generate_Fuzzball_using_PyRosetta.assemble_defined_fuzzball
         ligand_mcs = rdFMCS.FindMCS([ligand_ideal, ligand_pdb], bondCompare=rdFMCS.BondCompare.CompareAny)
         ligand_substructure_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
 
@@ -516,65 +537,71 @@ class Align_PDB(object):
         ligand_pdb_match = ligand_pdb.GetSubstructMatch(ligand_substructure_mol)
 
         # Assert 1:1 mapping excluding hydrogens
-        if len(ligand_ideal_match) != len([a for a in ligand_ideal.GetAtoms()]):
+        if len(ligand_ideal_match) != Chem.RemoveHs(ligand_ideal).GetNumAtoms():
             print('\nFull ligand was not mapped!\n')
-            return False, None
-
-        if len(ligand_ideal_match) != len(ligand_pdb_match):
             return False, None
 
         ideal_pdb_mapping = {i_idx: p_idx for i_idx, p_idx in zip(ligand_ideal_match, ligand_pdb_match)}
 
+        # DEBUGGING
+        # pprint(ideal_pdb_mapping)
+        
         # --- Map fragment SMILES onto ideal ligand SMILES --- #
 
-        # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
-        substructure_match = rdFMCS.FindMCS([self.fragment_ideal_rdkit_mol, ligand_ideal])
-        sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
-
-        # Fall back onto mapping without considering bond order
-        # This should catch instances where the full fragment can't be mapped due to inconsistencies with the provided
-        # SMILES strings... I've found that this is particularly an issue for matching aromatic bonds since the SMILES
-        # strings are converted to kekule structures.
-
-        if len(sub_mol.GetAtoms()) != len(self.ideal_fragment_mapping):
-            print('\nUnable to match fragment with correct bond orders, let\'s try ignoring them...\n')
-            substructure_match = rdFMCS.FindMCS([self.fragment_ideal_rdkit_mol, ligand_ideal], bondCompare=rdFMCS.BondCompare.CompareAny)
-            sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
-
-            if len(sub_mol.GetAtoms()) != len(self.ideal_fragment_mapping):
-                print('\nFailed to correctly map fragment onto target molecule...\n')
-                return False, None
-
-        # Return atom indicies of substructure matches for fragment and target
-        frag_matches = self.fragment_ideal_rdkit_mol.GetSubstructMatch(sub_mol)
-        target_matches = ligand_ideal.GetSubstructMatches(sub_mol)
-
-        # DEBUGGING
-        # from rdkit.Chem import Draw
-        # from rdkit.Chem.Draw.MolDrawing import MolDrawing, DrawingOptions
-        # DrawingOptions.includeAtomNumbers = True
-        #
-        # Draw.MolToFile(self.fragment_ideal_rdkit_mol, 'fragment_ideal.png')
-        # Draw.MolToFile(self.fragment_pdb_rdkit_mol, 'fragment_pdb.png')
-        # Draw.MolToFile(sub_mol, 'fragment_substructure_mol.png')
-        # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
-        # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
-
-        # todo: USE MAPPING TO GET VALENCE INFORMATION FROM TARGET LIGAND
-        # todo: REJECT MAPPINGS IF SUBSTRUCTURE VALENCES > FRAGMENT VALENCES
-        # Only add mappings to fragment_target_map if all atoms in substructure have <= atom neighbors as fragment in source molecule
+        # use fragment with hydrogens to map onto ideal ligand with hydrogens
         if self.verify_substructure:
+
+            # print('VERIFYING SUBSTRUCTURE')
+            # Hydrogen indicies are appended to current mol so heavy atom numbering is maintained
+            ligand_ideal_H = Chem.AddHs(ligand_ideal)
+
+            # Directly check for fragment substructure w/ hydrogens in idealized ligand mol
+            if ligand_ideal_H.HasSubstructMatch(self.fragment_pdb_rdkit_mol):
+                fragment_substruct = ligand_ideal_H.GetSubstructMatches(self.fragment_pdb_rdkit_mol)
+                fragment_pdb_match = self.fragment_pdb_rdkit_mol.GetSubstructMatch(self.fragment_pdb_rdkit_mol)  # I know, just roll with it...
+                ligand_pdb_match = fragment_substruct
+
+            # Generalize bond types if substructure mapping is unsuccessful
+            else:
+                fragment_substruct = rdFMCS.FindMCS([self.fragment_pdb_rdkit_mol, ligand_ideal_H], bondCompare=rdFMCS.BondCompare.CompareAny)
+
+                ligand_substructure_mol_Hs = Chem.MolFromSmarts(fragment_substruct.smartsString)
+                ligand_substructure_mol = Chem.RemoveHs(ligand_substructure_mol_Hs)
+
+                # DEBUGGING
+                # Chem.rdDepictor.Compute2DCoords(ligand_substructure_mol_Hs)
+                # Chem.rdDepictor.Compute2DCoords(ligand_substructure_mol)
+                # Draw.MolToFile(ligand_substructure_mol_Hs, 'fragment_substructure_mol_Hs.png')
+                # Draw.MolToFile(ligand_substructure_mol, 'fragment_substructure_mol.png')
+
+                fragment_pdb_match = self.fragment_pdb_rdkit_mol.GetSubstructMatch(ligand_substructure_mol)
+                ligand_pdb_match = ligand_ideal_H.GetSubstructMatches(ligand_substructure_mol)
+
+            # Get indicies for heavy atoms in fragment_ideal_match
+            fragment_pdb_match_heavyatoms = [atom for atom in fragment_pdb_match if self.fragment_pdb_rdkit_mol.GetAtomWithIdx(atom).GetAtomicNum() != 1]
+
+            # Only add mappings to fragment_target_map if all atoms in substructure have <= atom neighbors as fragment in source molecule
+            # print('VERIFYING VALENCES')
             fragment_target_map = list()
-            for target_match in target_matches:
+
+            for target_match in ligand_pdb_match:
                 include_mapping = True
-                for f_idx, t_idx in zip(frag_matches, target_match):
 
-                    # Get atom name from fragment match
-                    f_atomname = self.fragment_ideal_rdkit_mol.GetAtomWithIdx(f_idx).GetMonomerInfo().GetName().strip()
+                # ligand_ideal vs. self.fragment_pdb_rdkit_mol
+                # DEBUGGING
+                # print(target_match, fragment_pdb_match)
 
-                    # Find corresponding atom in reference conformer Mol...
-                    reference_neighborcount = self.reference_ligand_heavyatom_neighbors[f_atomname]
-                    target_neighborcount = len(ligand_ideal.GetAtomWithIdx(f_idx).GetNeighbors())
+                for f_idx, t_idx in zip(fragment_pdb_match, target_match):
+                    if f_idx not in fragment_pdb_match_heavyatoms: continue
+
+                    reference_neighborcount = self.pdbfrag_refdegree_map[f_idx]
+                    t_atom = ligand_ideal_H.GetAtomWithIdx(t_idx)
+                    # NOTE: GetTotalNumHs() doesn't seem to be working correctly...
+                    target_neighborcount = len([a.GetSymbol() for a in t_atom.GetNeighbors() if a.GetSymbol() != 'H'])
+
+                    # DEBUGGING
+                    # print('Indicies', f_idx, t_idx)
+                    # print(reference_neighborcount, target_neighborcount)
 
                     # Assert number of atom neighbors for atom <= neighbors for mapped atom in target match
                     if target_neighborcount > reference_neighborcount:
@@ -582,11 +609,63 @@ class Align_PDB(object):
                         break
 
                 if include_mapping:
-                    fragment_target_map.append([(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)])
 
-        # --- Map fragment atom index to target atom index --- #
+                    # --- Map fragment pdb atom index to target ligand pdb atom index --- #
+
+                    fragment_target_map.append([(f_idx, ideal_pdb_mapping[t_idx])
+                                                for f_idx, t_idx in zip(fragment_pdb_match, target_match)
+                                                if f_idx in fragment_pdb_match_heavyatoms])
+
+            # DEBUGGING
+            # Chem.rdDepictor.Compute2DCoords(self.fragment_ideal_rdkit_mol)
+            # Chem.rdDepictor.Compute2DCoords(self.fragment_pdb_rdkit_mol)
+            # Chem.rdDepictor.Compute2DCoords(ligand_ideal_H)
+            # Chem.rdDepictor.Compute2DCoords(ligand_ideal)
+            # Chem.rdDepictor.Compute2DCoords(ligand_pdb)
+            #
+            # Draw.MolToFile(self.fragment_ideal_rdkit_mol, 'fragment_ideal.png')
+            # Draw.MolToFile(self.fragment_pdb_rdkit_mol, 'fragment_pdb.png')
+            # Draw.MolToFile(ligand_ideal_H, 'ligand_ideal_H.png')
+            # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
+            # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
+
         else:
-            fragment_target_map = [[(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx]) for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
+            # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
+            # Assumption: ligand_ideal should be lacking hydrogens
+            substructure_match = rdFMCS.FindMCS([self.fragment_ideal_rdkit_mol, ligand_ideal])
+            sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
+
+            """
+            Fall back onto mapping without considering bond order
+            This should catch instances where the full fragment can't be mapped due to inconsistencies with the provided
+            SMILES strings... I've found that this is particularly an issue for matching aromatic bonds since the SMILES
+            strings are converted to kekule structures.
+            """
+
+            if len(sub_mol.GetAtoms()) != len(self.ideal_fragment_mapping):
+                print('\nUnable to match fragment with correct bond orders, let\'s try ignoring them...\n')
+                substructure_match = rdFMCS.FindMCS([self.fragment_ideal_rdkit_mol, ligand_ideal], bondCompare=rdFMCS.BondCompare.CompareAny)
+                sub_mol = Chem.MolFromSmarts(substructure_match.smartsString)
+
+                if len(sub_mol.GetAtoms()) != len(self.ideal_fragment_mapping):
+                    print('\nFailed to correctly map fragment onto target molecule...\n')
+                    return False, None
+
+            # Return atom indicies of substructure matches for fragment and target
+            frag_matches = self.fragment_ideal_rdkit_mol.GetSubstructMatch(sub_mol)
+            target_matches = ligand_ideal.GetSubstructMatches(sub_mol)
+
+            # DEBUGGING
+            # Draw.MolToFile(self.fragment_ideal_rdkit_mol, 'fragment_ideal.png')
+            # Draw.MolToFile(self.fragment_pdb_rdkit_mol, 'fragment_pdb.png')
+            # Draw.MolToFile(sub_mol, 'fragment_substructure_mol.png')
+            # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
+            # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
+
+            # --- Map fragment pdb atom index to target ligand pdb atom index --- #
+
+            fragment_target_map = [[(self.ideal_fragment_mapping[f_idx], ideal_pdb_mapping[t_idx])
+                                    for f_idx, t_idx in zip(frag_matches, target_match)] for target_match in target_matches]
 
         if len(fragment_target_map) > 0:
             return True, fragment_target_map
