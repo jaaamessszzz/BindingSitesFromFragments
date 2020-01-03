@@ -5,14 +5,14 @@ PDB_Rotamers line to an existing params file for the target ligand forces the ma
 available to it, meaning things take ~1 hour instead of ~1 minute (ERG, 58 conformers).
 
 Usage:
-molfile_split_into_singles <input_mol> <compound_id>
+molfile_split_into_singles <input_mol> <compound_id> [options]
 
 Arguements:
-    <input_mol>
-        path to the input sybyl mol2 file containing your conformer library
-        
-    <compound_id>
-        Three letter compound ID
+    <input_mol>                     Path to the input sybyl mol2 file containing your conformer library
+    <compound_id>                   Three letter compound ID
+
+Options:
+    -m=<path>, --mtp_path=<path>    Path to local copy of molfile_to_params.py
 """
 import sys
 import os
@@ -60,7 +60,7 @@ def dump_to_file(file_name, list_of_lines, compound_id):
     with open('{}_singletons.txt'.format(compound_id), 'a') as asdf:
         asdf.write(file_name + '\n')
 
-def generate_params_files(compound_id):
+def generate_params_files(compound_id, mtp_path):
     """
     Call Rosetta's mol_to_params.py to generate param files for all singleton .mol2 conformer files
     :return: 
@@ -69,8 +69,7 @@ def generate_params_files(compound_id):
     mol_list = open('{}_singletons.txt'.format(compound_id), 'r')
     for mol in mol_list:
         current_mol = mol.strip()
-        # todo: configure Rosetta path to user settings in config file
-        run_mol_to_params = subprocess.run(['/Users/jameslucas/Rosetta/main/source/scripts/python/public/molfile_to_params.py',
+        run_mol_to_params = subprocess.run([mtp_path,
                                             current_mol,
                                             '-n',
                                             current_mol.split('_')[0],
@@ -89,13 +88,13 @@ def generate_params_files(compound_id):
 
 def main():
     args = docopt.docopt(__doc__)
+    mtp_path = args['--mtp_path'] if args['--mtp_path'] else '/home/james/Repositories/Rosetta/main/source/scripts/python/public/molfile_to_params.py'
 
     molfile_split_into_singles(args['<input_mol>'], args['<compound_id>'])
-    generate_params_files(args['<compound_id>'])
+    generate_params_files(args['<compound_id>'], mtp_path)
 
     # Generate conformer library for scoring later
-    # todo: configure Rosetta path to user settings in config file
-    run_mol_to_params = subprocess.run( ['/Users/jameslucas/Rosetta/main/source/scripts/python/public/molfile_to_params.py',
+    run_mol_to_params = subprocess.run( [mtp_path,
                                          args['<input_mol>'],
                                          '-n',
                                          args['<compound_id>'],
@@ -107,9 +106,10 @@ def main():
     # Move "standard" .param files and conformer library to its own directory
     os.makedirs('Scoring_params', exist_ok=True)
 
-    shutil.copy2('{}.params'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.params'.format(args['<compound_id>'])))
-    shutil.copy2('{}.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.pdb'.format(args['<compound_id>'])))
-    shutil.copy2('{}_conformers.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}_conformers.pdb'.format(args['<compound_id>'])))
+    shutil.move('{}.params'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.params'.format(args['<compound_id>'])))
+    shutil.move('{}.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}.pdb'.format(args['<compound_id>'])))
+    if os.path.exists('{}_conformers.pdb'.format(args['<compound_id>'])):
+        shutil.move('{}_conformers.pdb'.format(args['<compound_id>']), os.path.join('Scoring_params', '{}_conformers.pdb'.format(args['<compound_id>'])))
 
 if __name__ == '__main__':
     main()
