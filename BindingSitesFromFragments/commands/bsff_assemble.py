@@ -40,7 +40,7 @@ def assemble(args):
       --hbond_limit=<hb_limit>        Limit to the number of hydrogen bonding residues to be added for each hydrogen
                                       bond donor/acceptor on the ligand
       -i=<index>, --index=<index>     Only generate fuzzballs with specified index
-      --skip-clean                    Don't generate inputs and go straight to fuzzball assembly for existing complexes
+      --skip_clean                    Don't generate inputs and go straight to fuzzball assembly for existing complexes
       --force_limit                   Force iterations to obey motif limits
     """
 
@@ -64,7 +64,11 @@ def assemble(args):
         complex_ligand_id = args['--complex_ligand_id'] if args['--complex_ligand_id'] else None
 
         derp = Generate_Fuzzball_using_PyRosetta(args['<user_defined_dir>'], current_iteration_dir)
-        derp.assemble_fuzzball_for_existing_complex(args['<existing_complex_path>'], ligand_params, ligand_reference, complex_ligand_id=complex_ligand_id, force_limit=args['--force_limit'])
+        derp.assemble_fuzzball_for_existing_complex(args['<existing_complex_path>'], ligand_params, ligand_reference,
+                                                    complex_ligand_id=complex_ligand_id,
+                                                    force_limit=args['--force_limit'],
+                                                    skip_clean=args['--skip_clean'],
+                                                    )
 
     else:
 
