@@ -4,6 +4,7 @@ import io
 import re
 import os
 import copy
+import json
 import pickle
 import shutil
 import collections
@@ -345,11 +346,12 @@ class Generate_Constraints(object):
 
         # Updated this for backbone contacts to allow for any residue identity
         if constraint_atoms_dict['residue']['atom_names'][0] in ['C', 'CA', 'N', 'O', 'OXT']:
-            residue_resname = 'ACDEFHIKLMNQRSTVWY'
+            residue_resname = 'A'
             residue_tag = 'residue1'
         else:
             residue_resname = residue_prody.getResnames()[0]
             residue_tag = 'residue3'
+
         ligand_resname = ligand_prody.getResnames()[0]
 
         # Increase tolerance/sampling by 5/1 for greasy residues (ACFILMVWY)
@@ -749,9 +751,10 @@ class Generate_Fuzzball_using_PyRosetta(object):
         for conformer in pdb_check(conformer_dir):
 
             # Initialize PyRosetta with stuff
-            conformer_name = os.path.basename(os.path.normpath(conformer)).split('.')[0]
-            current_params = conformer_name if conformer_dir == self.rosetta_inputs else self.chemical_component_identifier
-            current_params_path = os.path.join(conformer_dir, f'{current_params}.params')
+            conformer_name, _ = os.path.splitext(os.path.basename(os.path.normpath(conformer)))
+            # current_params = conformer_name if conformer_dir == self.rosetta_inputs else self.chemical_component_identifier
+            # current_params_path = os.path.join(conformer_dir, f'{current_params}.params')
+            current_params_path = os.path.join(conformer_dir, f'{conformer_name}.params')
 
             # core.conformation.Conformation muted, OXT is missing from all motif residues
             my_options = [f"-extra_res_fa {current_params_path} -flip_HNQ -packing:linmem_ig 20",
@@ -1114,7 +1117,8 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
         return current_conformer_fuzzball
 
-    def assemble_fuzzball_for_existing_complex(self, existing_complex_path, ligand_params, ligand_reference, complex_ligand_id=None, force_limit=False):
+    def assemble_fuzzball_for_existing_complex(self, existing_complex_path, ligand_params, ligand_reference,
+                                               complex_ligand_id=None, force_limit=False, skip_clean=False):
         """
         Map ligand atom names from a Rosetta params file onto the ligand atoms in an existing protein-ligand complex.
         This is required since the method uses the standardized param file atoms names to keep track of unique
@@ -1148,26 +1152,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
         :param ligand_reference: pdb file generated for ligand in existing complex by molfile_to_params.py
         """
 
-        # --- Process input complex --- #
-
-        existing_complex_prody = prody.parsePDB(existing_complex_path)
-        protein_only_prody = existing_complex_prody.select('protein').toAtomGroup()
-
-        # Clean protein-only portion of complex
-        clean_prody, removed_residues = clean_pdb(protein_only_prody)
-
-        ligand_selection_string = f'resname {self.chemical_component_identifier if not complex_ligand_id else complex_ligand_id}'
-        existing_complex_ligands = existing_complex_prody.select(ligand_selection_string)
-
-        try:
-            existing_complex_ligands_hv = existing_complex_ligands.getHierView()
-        except FailedAssemblyError:
-            raise FailedAssemblyError(f'No ligands with identifier "{complex_ligand_id}" exist in {existing_complex_path}')
-
-        reference_ligand_prody = prody.parsePDB(ligand_reference)
-        reference_ligand_mol = RDKit_Mol_from_ProDy(reference_ligand_prody, removeHs=False)
-
-        # Create paths to dump things
+        # --- Create paths to dump things --- #
         new_design_name = os.path.basename(os.path.normpath(existing_complex_path)).split('.')[0]
         new_design_path = os.path.join(self.user_defined_dir, 'Design', new_design_name)
         os.makedirs(new_design_path, exist_ok=True)
@@ -1177,35 +1162,61 @@ class Generate_Fuzzball_using_PyRosetta(object):
         shutil.copy2(ligand_params, conformer_dir)
         shutil.copy2(ligand_reference, conformer_dir)
 
-        assert existing_complex_ligands_hv.numResidues() == 1
+        # --- Process input complex --- #
 
-        # Use RDKit to map idealized ligand onto existing ligand atoms
-        for complex_ligand in existing_complex_ligands_hv.iterResidues():
+        if skip_clean:
+            shutil.copy(existing_complex_path, new_design_path)
+            clean_pdb_path = existing_complex_path
+            clean_prody = prody.parsePDB(clean_pdb_path)
 
-            complex_ligand_mol = RDKit_Mol_from_ProDy(complex_ligand, removeHs=False)
-            ligand_mcs = rdFMCS.FindMCS([reference_ligand_mol, complex_ligand_mol], bondCompare=rdFMCS.BondCompare.CompareAny)
-            ligand_mcs_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
+        else:
+            existing_complex_prody = prody.parsePDB(existing_complex_path)
+            protein_only_prody = existing_complex_prody.select('protein').toAtomGroup()
 
-            if complex_ligand_mol.GetNumHeavyAtoms() == ligand_mcs_mol.GetNumHeavyAtoms():
+            # Clean protein-only portion of complex
+            clean_prody, removed_residues = clean_pdb(protein_only_prody)
 
-                # Align ligand_ref onto existing complex_ligand
-                ligand_ref_no_H = reference_ligand_prody.select('not hydrogen').copy()
-                ligand_complex_no_H = complex_ligand.select('not hydrogen').copy()
-                transformation_matrix = prody.calcTransformation(ligand_ref_no_H, ligand_complex_no_H)
-                prody.applyTransformation(transformation_matrix, reference_ligand_prody)
+            ligand_selection_string = f'resname {self.chemical_component_identifier if not complex_ligand_id else complex_ligand_id}'
+            existing_complex_ligands = existing_complex_prody.select(ligand_selection_string)
 
-                # Remove old ligand from complex and replace with ligand generated by molfile_to_params.py
-                append_ligand_resnum = clean_prody.numResidues() + 1
-                reference_ligand_prody.setResnums([append_ligand_resnum] * len(reference_ligand_prody))
-                reference_ligand_prody.setChids(['X'] * len(reference_ligand_prody))
-                clean_prody += reference_ligand_prody
+            try:
+                existing_complex_ligands_hv = existing_complex_ligands.getHierView()
+            except FailedAssemblyError:
+                raise FailedAssemblyError(f'No ligands with identifier "{complex_ligand_id}" exist in {existing_complex_path}')
 
-            else:
-                raise Exception('Unable to map reference ligand onto complex ligand!')
+            reference_ligand_prody = prody.parsePDB(ligand_reference)
+            reference_ligand_mol = RDKit_Mol_from_ProDy(reference_ligand_prody, removeHs=False)
 
-        # Dump clean scaffold complex
-        clean_pdb_path = os.path.join(new_design_path, f'{os.path.basename(os.path.normpath(existing_complex_path)).split(".")[0]}-clean.pdb')
-        prody.writePDB(clean_pdb_path, clean_prody)
+            assert existing_complex_ligands_hv.numResidues() == 1
+
+            # Use RDKit to map idealized ligand onto existing ligand atoms
+            for complex_ligand in existing_complex_ligands_hv.iterResidues():
+
+                complex_ligand_mol = RDKit_Mol_from_ProDy(complex_ligand, removeHs=False)
+                ligand_mcs = rdFMCS.FindMCS([reference_ligand_mol, complex_ligand_mol], bondCompare=rdFMCS.BondCompare.CompareAny)
+                ligand_mcs_mol = Chem.MolFromSmarts(ligand_mcs.smartsString)
+
+                if complex_ligand_mol.GetNumHeavyAtoms() == ligand_mcs_mol.GetNumHeavyAtoms():
+
+                    # Align ligand_ref onto existing complex_ligand
+                    ligand_ref_no_H = reference_ligand_prody.select('not hydrogen').copy()
+                    ligand_complex_no_H = complex_ligand.select('not hydrogen').copy()
+                    # transformation_matrix = prody.calcTransformation(ligand_ref_no_H, ligand_complex_no_H)
+                    transformation_matrix = self.generate_constraints.calculate_transformation_matrix(ligand_ref_no_H, ligand_complex_no_H)
+                    prody.applyTransformation(transformation_matrix, reference_ligand_prody)
+
+                    # Remove old ligand from complex and replace with ligand generated by molfile_to_params.py
+                    append_ligand_resnum = clean_prody.numResidues() + 1
+                    reference_ligand_prody.setResnums([append_ligand_resnum] * len(reference_ligand_prody))
+                    reference_ligand_prody.setChids(['X'] * len(reference_ligand_prody))
+                    clean_prody += reference_ligand_prody
+
+                else:
+                    raise Exception('Unable to map reference ligand onto complex ligand!')
+
+            # Dump clean scaffold complex
+            clean_pdb_path = os.path.join(new_design_path, f'{os.path.basename(os.path.normpath(existing_complex_path)).split(".")[0]}-clean.pdb')
+            prody.writePDB(clean_pdb_path, clean_prody)
 
         # Copy reference params file, write rotamers to file, and append PDB_CONFORMER flag
         # source_params = os.path.join(self.rosetta_inputs, f'{self.chemical_component_identifier}_0001.params')
@@ -1422,6 +1433,9 @@ class Generate_Fuzzball_using_PyRosetta(object):
 
                 motif_residue_transformed, constraint_atoms_dict = self.transform_residue_about_current_conformer(current_conformer, motif_residue, apply_mapping=existing)
 
+                if motif_residue_transformed is None:
+                    continue
+
                 # --- Redundant residue check --- #
 
                 current_resname = motif_residue_transformed.getResnames()[0]
@@ -1506,10 +1520,16 @@ class Generate_Fuzzball_using_PyRosetta(object):
                     # Get coords from matcher contact atoms
                     pyrosetta_motif_residue = motif_pose.residue(1).clone()
                     atm_1, atm_2, atm_3 = tuple(current_motif_constraint_atoms)
-                    target_motif_coords = rosetta.numeric.xyzTransform_double_t(pyrosetta_motif_residue.xyz(atm_1),
-                                                                                pyrosetta_motif_residue.xyz(atm_2),
-                                                                                pyrosetta_motif_residue.xyz(atm_3),
-                                                                                )
+
+                    # todo: figure out how atom coords can become missing here...
+                    try:
+                        target_motif_coords = rosetta.numeric.xyzTransform_double_t(pyrosetta_motif_residue.xyz(atm_1),
+                                                                                    pyrosetta_motif_residue.xyz(atm_2),
+                                                                                    pyrosetta_motif_residue.xyz(atm_3),
+                                                                                    )
+                    except Exception as e:
+                        print(e)
+                        continue
 
                     motif_constraint_indicies = [pyrosetta_motif_residue.atom_index(atom) for atom in current_motif_constraint_atoms]
                     assert len(motif_constraint_indicies) == 3
@@ -1546,11 +1566,17 @@ class Generate_Fuzzball_using_PyRosetta(object):
                         sample_motif_rotamers.set_all_chi(current_rotamer_chis)
 
                         # Calculate rotation/translation by hand using first three residues of ligand
-                        mobile_motif_coords = rosetta.numeric.xyzTransform_double_t(
-                            sample_motif_rotamers.xyz(atm_1),
-                            sample_motif_rotamers.xyz(atm_2),
-                            sample_motif_rotamers.xyz(atm_3),
-                            )
+                        # todo: figure out how atom coords can become missing here...
+                        try:
+                            mobile_motif_coords = rosetta.numeric.xyzTransform_double_t(
+                                sample_motif_rotamers.xyz(atm_1),
+                                sample_motif_rotamers.xyz(atm_2),
+                                sample_motif_rotamers.xyz(atm_3),
+                                )
+                        except Exception as e:
+                            print(e)
+                            continue
+
                         mobile_motif_inverse = mobile_motif_coords.inverse()
 
                         motif_rotation = target_motif_coords.R * mobile_motif_inverse.R
@@ -1576,7 +1602,7 @@ class Generate_Fuzzball_using_PyRosetta(object):
                             if mainchain_rmsd < 2:
                                 compatible_match_positions.add(match_position)
 
-                    if len(compatible_match_positions) > 0:
+                    if len(compatible_match_positions) == 0:
                         print(f'{motif_residue_transformed.getData("contact_source")[0]} cannot be accommodated by the current match!\n')
                         continue
 
