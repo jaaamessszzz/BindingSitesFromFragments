@@ -5,9 +5,11 @@ import pypdb
 import json
 import pubchempy
 import xmltodict
-import pprint
+from pprint import pprint
 import urllib
 import os
+
+from rdkit import Chem
 
 from .utils import *
 
@@ -85,9 +87,9 @@ class Fragments(object):
         compound = pubchempy.get_compounds([ligand], ligand_input_format)
         pprint.pprint(compound[0].to_dict())
 
-    def search_for_fragment_containing_ligands(self, predefined_fragments=False):
+    def substructure_search_through_pubchem(self, predefined_fragments=False):
         """
-        Search PDB or Pubchem for fragment-containing small molecules.
+        Search Pubchem for fragment-containing small molecules.
         
         For each fragment:
         * Identify all small molecules containing the fragment
@@ -116,8 +118,7 @@ class Fragments(object):
             small molecules bound.
             
         * Sort fragment-containing compounds 
-        
-        todo:
+
         * Map fragment atoms to matched ligands
             I think the best way to do this would be to define three atoms in each fragment to calculate the 
             rotation/translation matrices. This would ensure all structures can be aligned with minimal amount of 
@@ -166,6 +167,42 @@ class Fragments(object):
             # REPORT
             print(f'\n{current_fragment}\n')
             print(f'Ligands found to contain {current_fragment}:\n{pdbid_set}')
+
+            # Download PDBs
+            pdb_dict[current_fragment]['Ligands'] = list(pdbid_set)
+            pdb_dict[current_fragment]['PDBs'] = self.search_PDBs(pdbid_set)
+
+        with open(os.path.join(self.user_defined_dir, 'PDB_search_results.json'), 'w') as jsonfile:
+            json.dump(pdb_dict, jsonfile)
+
+    def substructure_search_through_pdb(self):
+        """
+        This uses the smilesQuery REST API through the PDB to find substructure containing molecules. Pros: this only
+        returns molecules that are present in the PDB and doesn't require interfacing with PubChem. Cons: the substructure
+        search function through the PDB doesn't allow you to define fragment atom valences/neighbors/connectivites.
+        However, this should be caught by logic in Align_PDB.fragment_target_mapping and the fragment RMSD filter.
+        :return:
+        """
+        pdb_dict = {}
+
+        fragment_dir = os.path.join(f"{self.user_defined_dir}", "Inputs", "Fragment_Inputs")
+
+        for fragment_pdb in pdb_check(fragment_dir, base_only=True):
+
+            current_fragment = fragment_pdb[:-4]
+            fragment_mol = Chem.MolFromPDBFile(os.path.join(fragment_dir, fragment_pdb))
+            fragment_smiles = Chem.MolToSmiles(fragment_mol)
+
+            print(fragment_smiles)
+
+            search_request = f'http://www.rcsb.org/pdb/rest/smilesQuery?smiles={fragment_smiles}&search_type=substructure'
+            pprint(search_request)
+
+            # todo: figure out why PDB times out...
+            search_result = urllib.request.urlopen(search_request, data=None, timeout=10)
+            pprint(search_result)
+            pprint(search_result.read())
+            pdbid_set = None
 
             # Download PDBs
             pdb_dict[current_fragment]['Ligands'] = list(pdbid_set)
