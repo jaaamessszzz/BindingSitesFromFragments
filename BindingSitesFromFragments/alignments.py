@@ -125,6 +125,7 @@ class Align_PDB_Factory(object):
                 found_pdb, pdb_path = self.return_PDB_to_use_for_alignments(pdbid, use_local_pdb_database=use_local_pdb_database)
 
                 if not found_pdb:
+                    print(f'Cannot find {pdbid}!')
                     continue
 
                 # Proceed with processing if the current PDB passes all filters
@@ -287,23 +288,19 @@ class Align_PDB_Factory(object):
 
             if pdb_path_exists:
                 return True, pdb_path
-            else:
-                return False, None
 
-        elif f'{pdbid}.pdb.gz' in os.listdir(self.pdb_bank_dir):
+        # if f'{pdbid}.pdb.gz' in os.listdir(self.pdb_bank_dir):
+        #
+        #     pdb_path = os.path.join(self.pdb_bank_dir, f'{pdbid}.pdb.gz')
+        #     return True, pdb_path
 
-            pdb_path = os.path.join(self.pdb_bank_dir, f'{pdbid}.pdb.gz')
-            return True, pdb_path
+        try:
+            pdb_path = prody.fetchPDBviaFTP(pdbid)
+            return True, [pdb_path] if len(pdb_path) == 1 else pdb_path
 
-        else:
-
-            try:
-                pdb_path = prody.fetchPDBviaFTP(pdbid)
-                return True, [pdb_path] if len(pdb_path) == 1 else pdb_path
-
-            except Exception as e:
-                print(f'\nThere was an error retrieving {pdbid.upper()} from the RCSB FTP server:\n{e}')
-                return False, None
+        except Exception as e:
+            print(f'\nThere was an error retrieving {pdbid.upper()} from the RCSB FTP server:\n{e}')
+            return False, None
 
     def return_substructure_containing_ligands(self, pdb_path, pdb_ligand_json, current_fragment):
         """
