@@ -1,15 +1,14 @@
-# Binding-Sites-From-Fragments
+# BindingSitesFromFragments
 
-<p>This is a Python3 package developed by James Lucas and friends in the Kortemme lab at UCSF for generating composite
+<p>This is a Python3 package developed by James Lucas in the Kortemme lab at UCSF for generating composite
 small molecule binding sites.</p>
 
 ## Requirements
 Other than the requirements listed in requirements.txt, this package also requires:
-* RDKit (installing through Homebrew is the easiest)
-* MySQL or SQLite (MySQL preferred)
+* RDKit
+* PyRosetta
 
 <b>Optional:</b>
-* Gurobi (highly recommended)
 * Openeye Omega (or some other way for generating small molecule conformers)
 
 ## Installation

@@ -50,7 +50,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'bsff = BindingSitesFromFragments.usage:main',
+            'bsff = BindingSitesFromFragments.commands.bsff:main',
             'bsff_clean = BindingSitesFromFragments.commands.bsff:main'
         ],
     },
