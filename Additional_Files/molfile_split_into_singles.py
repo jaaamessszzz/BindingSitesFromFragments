@@ -69,7 +69,8 @@ def generate_params_files(compound_id, mtp_path):
     mol_list = open('{}_singletons.txt'.format(compound_id), 'r')
     for mol in mol_list:
         current_mol = mol.strip()
-        run_mol_to_params = subprocess.run([mtp_path,
+        run_mol_to_params = subprocess.run(['python2',
+                                            mtp_path,
                                             current_mol,
                                             '-n',
                                             current_mol.split('_')[0],
@@ -94,7 +95,8 @@ def main():
     generate_params_files(args['<compound_id>'], mtp_path)
 
     # Generate conformer library for scoring later
-    run_mol_to_params = subprocess.run( [mtp_path,
+    run_mol_to_params = subprocess.run( ['python2',
+                                         mtp_path,
                                          args['<input_mol>'],
                                          '-n',
                                          args['<compound_id>'],
