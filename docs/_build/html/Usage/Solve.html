@@ -1,0 +1,276 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Solve for Composite Binding Sites &mdash; BindingSitesFromFragments 1.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="../_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script type="text/javascript" src="../_static/jquery.js"></script>
+        <script type="text/javascript" src="../_static/underscore.js"></script>
+        <script type="text/javascript" src="../_static/doctools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script async="async" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Match Binding Sites to Scaffolds" href="Match.html" />
+    <link rel="prev" title="Assemble Contact Pools" href="Assemble.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> BindingSitesFromFragments
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.0
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../Installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Usage</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="New.html">Start a New Project</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Define_Fragments.html">Define Fragments</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Search.html">Search for Ligand-Protein Complexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Align.html">Align</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Cluster.html">Cluster Protein-Fragment Contacts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Assemble.html">Assemble Contact Pools</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Solve for Composite Binding Sites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Match.html">Match Binding Sites to Scaffolds</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Design.html">Generate Designs</a></li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">BindingSitesFromFragments</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="index.html">Usage</a> &raquo;</li>
+        
+      <li>Solve for Composite Binding Sites</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/Usage/Solve.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="solve-for-composite-binding-sites">
+<h1>Solve for Composite Binding Sites<a class="headerlink" href="#solve-for-composite-binding-sites" title="Permalink to this headline">¶</a></h1>
+<p>From the <code class="docutils literal notranslate"><span class="pre">Compounds/</span></code> directory, enter:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">bsff</span> <span class="n">mcsolve</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">current_iteration_fuzzball_dir</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">motif_size</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>Where &lt;Compound_ID&gt; is the name of the project directory for your target molecule, &lt;current_iteration_fuzzball_dir&gt; is
+the directory containing the contact pool created by the <cite>bsff assemble</cite> command, and &lt;motif_size&gt; is the number of
+residues that should compose the composite binding site (this include the ligand!).</p>
+<dl class="function">
+<dt id="BindingSitesFromFragments.commands.bsff_gurobi.mc_solve">
+<code class="sig-prename descclassname">BindingSitesFromFragments.commands.bsff_gurobi.</code><code class="sig-name descname">mc_solve</code><span class="sig-paren">(</span><em class="sig-param">args</em><span class="sig-paren">)</span><a class="headerlink" href="#BindingSitesFromFragments.commands.bsff_gurobi.mc_solve" title="Permalink to this definition">¶</a></dt>
+<dd><p>Produce binding motif solutions using a simulated annealing monte carlo protocol</p>
+<dl>
+<dt>Usage:</dt><dd><p>bsff mcsolve &lt;user_defined_dir&gt; &lt;current_iteration_fuzzball_dir&gt; &lt;motif_size&gt; [options]</p>
+</dd>
+<dt>Arguments:</dt><dd><p>&lt;user_defined_dir&gt;                        Path to project root directory
+&lt;current_iteration_fuzzball_dir&gt;          Directory containing fuzzballs for current iteration
+&lt;motif_size&gt;                              Target binding motif size</p>
+</dd>
+<dt>Options:</dt><dd><dl class="option-list">
+<dt><kbd><span class="option">--block=<var>&lt;block_size&gt;</var></span>, <span class="option">-b <var>&lt;block_size&gt;</var></span></kbd></dt>
+<dd><p>If running on the cluster, number of trajectories per fuzzball</p>
+</dd>
+<dt><kbd><span class="option">--include_defined</span>, <span class="option">-i</span></kbd></dt>
+<dd><p>Included defined residues</p>
+</dd>
+</dl>
+</dd>
+</dl>
+</dd></dl>
+
+<p>For each target ligand conformer, a Markov Chain Monte Carlo protocol was applied to assemble discrete side-chains in
+the contact ensemble into composite binding sites. A composite binding site is initialized with three random side-chains
+from the contact ensemble and select two-body score terms in Rosetta’s energy function (fa_rep, fa_atr, fa_elec,
+hbond_sc, hbond_bb_sc, fa_sol) are used to evaluate the overall energy of the binding site. During each move, a side
+chain in the current binding site is replaced with a random side chain from the contact ensemble. The new binding site
+is scored and the move is kept based on the Metropolis criterion, where the objective is to minimize the energy of the
+composite binding site. Temperature is ramped down geometrically across seven steps. Up to ten trajectories are
+performed for each contact ensemble and the best 100,000 solutions discovered per trajectory are recorded.</p>
+<dl class="function">
+<dt id="BindingSitesFromFragments.solve.montecarlo_motif">
+<code class="sig-prename descclassname">BindingSitesFromFragments.solve.</code><code class="sig-name descname">montecarlo_motif</code><span class="sig-paren">(</span><em class="sig-param">user_defined_dir</em>, <em class="sig-param">fuzzball_path</em>, <em class="sig-param">motif_size</em>, <em class="sig-param">block_count=None</em>, <em class="sig-param">include_defined=False</em>, <em class="sig-param">solutions=100000</em><span class="sig-paren">)</span><a class="headerlink" href="#BindingSitesFromFragments.solve.montecarlo_motif" title="Permalink to this definition">¶</a></dt>
+<dd><p>Use PyRosetta and a simulated annealing monte carlo method to find binding site solutions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>user_defined_dir</strong> – Path to project root directory</p></li>
+<li><p><strong>fuzzball_path</strong> – Path to directory containing fuzzballs for current iteration</p></li>
+<li><p><strong>motif_size</strong> – Number of residues (including ligand) to include in binding motif solutions</p></li>
+<li><p><strong>block_count</strong> – Number of trajectories per conformer</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="Match.html" class="btn btn-neutral float-right" title="Match Binding Sites to Scaffolds" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="Assemble.html" class="btn btn-neutral float-left" title="Assemble Contact Pools" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2020, James Lucas
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

@@ -1,0 +1,24 @@
+*********************************
+Solve for Composite Binding Sites
+*********************************
+
+From the ``Compounds/`` directory, enter: ::
+
+    bsff mcsolve <Compound_ID> <current_iteration_fuzzball_dir> <motif_size>
+
+Where <Compound_ID> is the name of the project directory for your target molecule, <current_iteration_fuzzball_dir> is
+the directory containing the contact pool created by the `bsff assemble` command, and <motif_size> is the number of
+residues that should compose the composite binding site (this include the ligand!).
+
+.. autofunction:: BindingSitesFromFragments.commands.bsff_gurobi.mc_solve
+
+For each target ligand conformer, a Markov Chain Monte Carlo protocol was applied to assemble discrete side-chains in
+the contact ensemble into composite binding sites. A composite binding site is initialized with three random side-chains
+from the contact ensemble and select two-body score terms in Rosetta’s energy function (fa_rep, fa_atr, fa_elec,
+hbond_sc, hbond_bb_sc, fa_sol) are used to evaluate the overall energy of the binding site. During each move, a side
+chain in the current binding site is replaced with a random side chain from the contact ensemble. The new binding site
+is scored and the move is kept based on the Metropolis criterion, where the objective is to minimize the energy of the
+composite binding site. Temperature is ramped down geometrically across seven steps. Up to ten trajectories are
+performed for each contact ensemble and the best 100,000 solutions discovered per trajectory are recorded.
+
+.. autofunction:: BindingSitesFromFragments.solve.montecarlo_motif

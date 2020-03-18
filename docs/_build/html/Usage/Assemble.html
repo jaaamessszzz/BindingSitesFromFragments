@@ -1,0 +1,295 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Assemble Contact Pools &mdash; BindingSitesFromFragments 1.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="../_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script type="text/javascript" src="../_static/jquery.js"></script>
+        <script type="text/javascript" src="../_static/underscore.js"></script>
+        <script type="text/javascript" src="../_static/doctools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script async="async" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Solve for Composite Binding Sites" href="Solve.html" />
+    <link rel="prev" title="Cluster Protein-Fragment Contacts" href="Cluster.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> BindingSitesFromFragments
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.0
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../Installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Usage</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="New.html">Start a New Project</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Define_Fragments.html">Define Fragments</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Search.html">Search for Ligand-Protein Complexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Align.html">Align</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Cluster.html">Cluster Protein-Fragment Contacts</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Assemble Contact Pools</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Solve.html">Solve for Composite Binding Sites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Match.html">Match Binding Sites to Scaffolds</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Design.html">Generate Designs</a></li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">BindingSitesFromFragments</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="index.html">Usage</a> &raquo;</li>
+        
+      <li>Assemble Contact Pools</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/Usage/Assemble.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="assemble-contact-pools">
+<h1>Assemble Contact Pools<a class="headerlink" href="#assemble-contact-pools" title="Permalink to this headline">¶</a></h1>
+<p>From the <code class="docutils literal notranslate"><span class="pre">Compounds/</span></code> directory, enter:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">bsff</span> <span class="n">assemble</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>Where &lt;Compound_ID&gt; is the name of the project directory for your target molecule. The fuzzballs assembled at this step
+are used to solve for composite binding sites. If you are using contact pools to directly redesign the context of an
+existing protein-ligand complex, you can skip to <a class="reference internal" href="Design.html#existingcomplexfuzzball"><span class="std std-ref">Generating a Contact Pool for an Existing Complex</span></a>.</p>
+<dl class="function">
+<dt id="BindingSitesFromFragments.commands.bsff_assemble.assemble">
+<code class="sig-prename descclassname">BindingSitesFromFragments.commands.bsff_assemble.</code><code class="sig-name descname">assemble</code><span class="sig-paren">(</span><em class="sig-param">args</em><span class="sig-paren">)</span><a class="headerlink" href="#BindingSitesFromFragments.commands.bsff_assemble.assemble" title="Permalink to this definition">¶</a></dt>
+<dd><p>Build a fuzzball using the best scoring side chain interactions with the defined ligand</p>
+<p>NOTE: if you are building a fuzzball for an existing protein-ligand complex (i.e. a complex from the PDB, really
+any protein-ligand complex not created by the protocol!) you must generate a new params file for the ligand!</p>
+<dl>
+<dt>Usage:</dt><dd><p>bsff assemble &lt;user_defined_dir&gt; [options]
+bsff assemble &lt;user_defined_dir&gt; iteration &lt;selected_match_dir&gt; [options]
+bsff assemble &lt;user_defined_dir&gt; existing &lt;existing_complex_path&gt; &lt;ligand_params&gt; &lt;ligand_ref&gt; [options]</p>
+</dd>
+<dt>Arguments:</dt><dd><p>&lt;user_defined_dir&gt;              Path to project root directory
+existing                        Generate a fuzzball for an existing protein-ligand complex (e.g. from the PDB)
+iteration                       Add motif residues from a previous iteration
+&lt;selected_match_dir&gt;            Path to directory containing selected matches using <cite>prepare_match_iterations.py</cite>
+&lt;existing_complex_path&gt;         Path to an existing protein-ligand complex
+&lt;ligand_params&gt;                 Params file generated for the ligand extracted from the input complex
+&lt;ligand_ref&gt;                    Ligand generated by molfile_to_params.py for the extracted ligand from the input complex</p>
+</dd>
+<dt>Options:</dt><dd><dl class="option-list">
+<dt><kbd><span class="option">--previous_iteration=<var>&lt;dir&gt;</var></span></kbd></dt>
+<dd><p>Directory containing previous iteration fuzzballs</p>
+</dd>
+<dt><kbd><span class="option">--current_iteration=<var>&lt;dir&gt;</var></span></kbd></dt>
+<dd><p>Name for directory for current iteration fuzzballs</p>
+</dd>
+<dt><kbd><span class="option">--add_user_defined_motifs</span></kbd></dt>
+<dd><p>Add any motif residues defined under <cite>Inputs/Defined_Interactions</cite> to the fuzzball</p>
+</dd>
+<dt><kbd><span class="option">--complex_ligand_id=<var>&lt;cci&gt;</var></span></kbd></dt>
+<dd><p>Three-letter chemical component identifier for ligand in an existing complex</p>
+</dd>
+<dt><kbd><span class="option">--fuzzball_limit=<var>&lt;fuzz_limit&gt;</var></span></kbd></dt>
+<dd><p>Limit to the number of motif residues to be added to the fuzzball</p>
+</dd>
+<dt><kbd><span class="option">--hbond_limit=<var>&lt;hb_limit&gt;</var></span></kbd></dt>
+<dd><p>Limit to the number of hydrogen bonding residues to be added for each hydrogen
+bond donor/acceptor on the ligand</p>
+</dd>
+</dl>
+<p>-i=&lt;index&gt;, –index=&lt;index&gt;     Only generate fuzzballs with specified index
+–skip_clean                    Don’t generate inputs and go straight to fuzzball assembly for existing complexes
+–force_limit                   Force iterations to obey motif limits</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>Your project should now look like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">+--</span> <span class="n">Compounds</span>
+    <span class="o">+--</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span>
+        <span class="o">+--</span> <span class="n">Inputs</span>
+        <span class="o">+--</span> <span class="n">Transformed_Aligned_PDBs</span>
+        <span class="o">+--</span> <span class="n">Fragment_PDB_Matches</span>
+        <span class="o">+--</span> <span class="n">Cluster_Results</span>
+        <span class="o">+--</span> <span class="n">Fuzzballs</span>
+            <span class="o">+--</span> <span class="n">Iteration</span><span class="o">-</span><span class="mi">0</span>
+                <span class="o">+--</span> <span class="n">XXX_0001</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">ag</span><span class="o">.</span><span class="n">npz</span>
+                <span class="o">+--</span> <span class="n">XXX_0001</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">pdb</span>
+                <span class="o">+--</span> <span class="n">XXX_0001</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">csv</span>
+                <span class="o">+--</span> <span class="n">XXX_0002</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">ag</span><span class="o">.</span><span class="n">npz</span>
+                <span class="o">+--</span> <span class="n">XXX_0002</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">pdb</span>
+                <span class="o">+--</span> <span class="n">XXX_0002</span><span class="o">-</span><span class="n">iter_0</span><span class="o">-</span><span class="n">fuzz_0</span><span class="o">.</span><span class="n">csv</span>
+                <span class="o">+--</span> <span class="o">..</span>
+        <span class="o">+--</span> <span class="n">PDB_search_results</span><span class="o">.</span><span class="n">json</span>
+</pre></div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="Solve.html" class="btn btn-neutral float-right" title="Solve for Composite Binding Sites" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="Cluster.html" class="btn btn-neutral float-left" title="Cluster Protein-Fragment Contacts" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2020, James Lucas
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

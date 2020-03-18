@@ -1,0 +1,246 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Search for Ligand-Protein Complexes &mdash; BindingSitesFromFragments 1.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="../_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script type="text/javascript" src="../_static/jquery.js"></script>
+        <script type="text/javascript" src="../_static/underscore.js"></script>
+        <script type="text/javascript" src="../_static/doctools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script async="async" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="next" title="Align" href="Align.html" />
+    <link rel="prev" title="Define Fragments" href="Define_Fragments.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> BindingSitesFromFragments
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.0
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../Installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Usage</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="New.html">Start a New Project</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Define_Fragments.html">Define Fragments</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Search for Ligand-Protein Complexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Align.html">Align</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Cluster.html">Cluster</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Solve.html">Solve for Composite Binding Sites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Match.html">Match Binding Sites to Scaffolds</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Design.html">Generate Designs</a></li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">BindingSitesFromFragments</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="index.html">Usage</a> &raquo;</li>
+        
+      <li>Search for Ligand-Protein Complexes</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/Usage/Search.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="search-for-ligand-protein-complexes">
+<h1>Search for Ligand-Protein Complexes<a class="headerlink" href="#search-for-ligand-protein-complexes" title="Permalink to this headline">¶</a></h1>
+<p>From the <code class="docutils literal notranslate"><span class="pre">Compounds/</span></code> directory, enter:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">bsff</span> <span class="n">search</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>Where &lt;Compound_ID&gt; is the name of the project directory for you target molecule. This function will search for proteins
+bound to small molecules specificed in the PubChem search results for each fragment. A JSON file called
+<cite>PDB_search_results.json</cite> keeps track of ligands and associated complexes in the PDB that possess each defined
+fragment as a substructure. In addition, a directory called <cite>Fragment_PDB_Matches</cite> will be created that stores the
+PubChem Compound IDs for fragment-containing compounds in CSV format.</p>
+<p>Your project should now look like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">+--</span> <span class="n">Compounds</span>
+<span class="o">+--</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span>
+    <span class="o">+--</span> <span class="n">Inputs</span>
+        <span class="o">+--</span> <span class="n">Fragment_Inputs</span>
+        <span class="o">|</span>   <span class="o">+--</span> <span class="n">Fragment_Inputs</span><span class="o">.</span><span class="n">csv</span>
+        <span class="o">|</span>   <span class="o">+--</span> <span class="o">*</span> <span class="n">All</span> <span class="n">fragment</span> <span class="o">.</span><span class="n">pdb</span> <span class="n">files</span> <span class="o">*</span>
+        <span class="o">|</span>   <span class="o">+--</span> <span class="o">*</span> <span class="n">All</span> <span class="n">fragment</span> <span class="o">.</span><span class="n">csv</span> <span class="n">search</span> <span class="n">results</span> <span class="kn">from</span> <span class="nn">PubChem</span> <span class="o">*</span>
+        <span class="o">+--</span> <span class="n">Rosetta_Inputs</span>
+        <span class="o">|</span>   <span class="o">+--</span> <span class="o">*</span> <span class="n">All</span> <span class="n">conformer</span> <span class="o">.</span><span class="n">pdb</span> <span class="n">files</span> <span class="o">*</span>
+        <span class="o">|</span>   <span class="o">+--</span> <span class="o">*</span> <span class="n">All</span> <span class="n">conformer</span> <span class="o">.</span><span class="n">param</span> <span class="n">files</span> <span class="o">*</span>
+        <span class="o">+--</span> <span class="n">User_Inputs</span>
+    <span class="o">+--</span> <span class="n">Fragment_PDB_Matches</span>
+    <span class="o">+--</span> <span class="n">PDB_search_results</span><span class="o">.</span><span class="n">json</span>
+</pre></div>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="Align.html" class="btn btn-neutral float-right" title="Align" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right"></span></a>
+      
+      
+        <a href="Define_Fragments.html" class="btn btn-neutral float-left" title="Define Fragments" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2020, James Lucas
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

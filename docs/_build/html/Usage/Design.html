@@ -1,0 +1,351 @@
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>Generate Designs &mdash; BindingSitesFromFragments 1.0 documentation</title>
+  
+
+  
+  
+  
+  
+
+  
+  <script type="text/javascript" src="../_static/js/modernizr.min.js"></script>
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="../" src="../_static/documentation_options.js"></script>
+        <script type="text/javascript" src="../_static/jquery.js"></script>
+        <script type="text/javascript" src="../_static/underscore.js"></script>
+        <script type="text/javascript" src="../_static/doctools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script async="async" type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.5/latest.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    
+    <script type="text/javascript" src="../_static/js/theme.js"></script>
+
+    
+
+  
+  <link rel="stylesheet" href="../_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="../_static/pygments.css" type="text/css" />
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Match Binding Sites to Scaffolds" href="Match.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="../index.html" class="icon icon-home"> BindingSitesFromFragments
+          
+
+          
+          </a>
+
+          
+            
+            
+              <div class="version">
+                1.0
+              </div>
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../Installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="index.html">Usage</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="New.html">Start a New Project</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Define_Fragments.html">Define Fragments</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Search.html">Search for Ligand-Protein Complexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Align.html">Align</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Cluster.html">Cluster Protein-Fragment Contacts</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Assemble.html">Assemble Contact Pools</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Solve.html">Solve for Composite Binding Sites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="Match.html">Match Binding Sites to Scaffolds</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Generate Designs</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#generating-a-contact-pool-for-an-existing-complex">Generating a Contact Pool for an Existing Complex</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#for-protein-ligand-complexes-generated-from-rosettamatch">For protein-ligand complexes generated from RosettaMatch:</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#for-all-other-protein-ligand-complexes">For all other protein-ligand complexes:</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#designing-a-protein-ligand-complex-with-complementary-rotamersets">Designing a Protein-Ligand Complex with Complementary RotamerSets</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#generating-complementary-rotamers-for-design">Generating Complementary Rotamers for Design</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">BindingSitesFromFragments</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="../index.html">Docs</a> &raquo;</li>
+        
+          <li><a href="index.html">Usage</a> &raquo;</li>
+        
+      <li>Generate Designs</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="../_sources/Usage/Design.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="generate-designs">
+<h1>Generate Designs<a class="headerlink" href="#generate-designs" title="Permalink to this headline">¶</a></h1>
+<p>Design using BindingSitesFromFragments takes place in two two steps. First, we will need to generate a new contact pool
+for contacts that may be recapitulated in the context of a protein-ligand complex. Second, rotamers need to be added to
+Rosetta’s Packer and flagged so that we bias incorporation of these residues with the special_rot score term.</p>
+<div class="section" id="generating-a-contact-pool-for-an-existing-complex">
+<span id="existingcomplexfuzzball"></span><h2>Generating a Contact Pool for an Existing Complex<a class="headerlink" href="#generating-a-contact-pool-for-an-existing-complex" title="Permalink to this headline">¶</a></h2>
+<p>From the <code class="docutils literal notranslate"><span class="pre">Compounds/</span></code> directory, enter:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">bsff</span> <span class="n">assemble</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span> <span class="n">existing</span> <span class="o">&lt;</span><span class="n">existing_complex_path</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">ligand_params</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">ligand_ref</span><span class="o">&gt;</span> <span class="p">[</span><span class="n">options</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>Where <cite>&lt;existing_complex_path&gt;</cite> is the path to an existing protein-ligand complex, <cite>&lt;ligand_params&gt;</cite> is the params file
+generated by Rosetta’s molfile_to_params.py for the <em>exact</em> ligand in <cite>&lt;existing_complex_path&gt;</cite>, and <cite>&lt;ligand_ref&gt;</cite> is the
+PDB file generated by Rosetta’s molefile_to_params.py for the <em>exact</em> ligand in <cite>&lt;existing_complex_path&gt;</cite>.</p>
+<div class="section" id="for-protein-ligand-complexes-generated-from-rosettamatch">
+<h3>For protein-ligand complexes generated from RosettaMatch:<a class="headerlink" href="#for-protein-ligand-complexes-generated-from-rosettamatch" title="Permalink to this headline">¶</a></h3>
+<p>Use the params file and PDB used to generate the match. These are specified in the match PDB output filename and can be
+found in the <cite>&lt;Compound_ID&gt;/Inputs/Rosetta_Inputs</cite> directory.</p>
+</div>
+<div class="section" id="for-all-other-protein-ligand-complexes">
+<h3>For all other protein-ligand complexes:<a class="headerlink" href="#for-all-other-protein-ligand-complexes" title="Permalink to this headline">¶</a></h3>
+<p>You will need to use Rosetta’s molfile_to_params.py to generate a params file and reference PDB for the <em>exact</em> ligand
+in the protein-ligand complex you want to design. Use a program like Avogadro to extract the ligand from the PDB file
+specified by <cite>&lt;existing_complex_path&gt;</cite>, save it as a Sybyl mol2 file, and use it as in input to molfile_to_params.py. Both
+<cite>&lt;ligand_params&gt;</cite> and &lt;ligand_ref&gt; will be generated at the same time by molfile_to_params.py.</p>
+<p>By default, the assembly protocol for an existing complex will attempt to clean the PDB file specified by
+<cite>&lt;existing_complex_path&gt;</cite> to remove any ligands that do not share the same chemical component identifier as <cite>&lt;Compound_ID&gt;</cite>
+and remove any residues that are missing backbone atoms. It will also attempt to replace MSE-&gt; MET and SEC-&gt; CYS. This
+should not modify PDBs generated by RosettaMatch, and can be skipped using the <cite>–skip_clean</cite> option.</p>
+<p>A contact pool will be generated for each ligand in the protein-ligand complex with the chemical component identifier as
+indicated by <cite>&lt;Compound_ID&gt;</cite>.</p>
+<p>Contact pools for existing complexes are generated in their own subdirectory under <cite>Compounds/&lt;Compound_ID&gt;/Design</cite> to
+consolidate all files required for designing a protein-ligand complex with complementary RotamerSets as straightforward
+as possible. The directory structure is as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">+--</span> <span class="n">Compounds</span>
+        <span class="o">+--</span> <span class="o">&lt;</span><span class="n">Compound_ID</span><span class="o">&gt;</span>
+            <span class="o">+--</span> <span class="n">Inputs</span>
+            <span class="o">+--</span> <span class="n">Transformed_Aligned_PDBs</span>
+            <span class="o">+--</span> <span class="n">Fragment_PDB_Matches</span>
+            <span class="o">+--</span> <span class="n">Cluster_Results</span>
+            <span class="o">+--</span> <span class="n">Fuzzballs</span>
+            <span class="o">+--</span> <span class="n">Design</span>
+                <span class="o">+--</span> <span class="n">Complex_name</span>
+                    <span class="o">+--</span> <span class="n">Fuzzballs</span>
+                    <span class="o">+--</span> <span class="n">Conformers</span>
+                    <span class="o">+--</span> <span class="n">Existing_complex</span><span class="o">-</span><span class="n">clean</span><span class="o">.</span><span class="n">pdb</span>
+                    <span class="o">+--</span> <span class="n">motif_residue_attributes</span><span class="o">.</span><span class="n">csv</span>
+            <span class="o">+--</span> <span class="n">PDB_search_results</span><span class="o">.</span><span class="n">json</span>
+</pre></div>
+</div>
+<p>The <cite>Conformers</cite> directory contains copies of &lt;ligand_params&gt; and &lt;ligand_ref&gt;. All information for the complex contact
+pool are in the <cite>Fuzzball</cite> directory and <cite>motif_residue_attributes.csv</cite>. The cleaned version of the input protein-ligand
+complex passed in as <cite>&lt;existing_complex_path&gt;</cite> is copied to the Design directory with <cite>–clean</cite> appended.</p>
+</div>
+</div>
+<div class="section" id="designing-a-protein-ligand-complex-with-complementary-rotamersets">
+<h2>Designing a Protein-Ligand Complex with Complementary RotamerSets<a class="headerlink" href="#designing-a-protein-ligand-complex-with-complementary-rotamersets" title="Permalink to this headline">¶</a></h2>
+<p>The following command will perform design on a specified protein-ligand complex:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">bsff</span> <span class="n">design</span> <span class="o">&lt;</span><span class="n">ligand_conformer_path</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">match_path</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">match_residue_map</span><span class="o">&gt;</span> <span class="o">&lt;</span><span class="n">params_path</span><span class="o">&gt;</span> <span class="p">[</span><span class="n">options</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>Conveniently, all of these files are consolidated into one place by the assembly procedure for an existing complex.
+This command can be run from anywhere, but should be run where you want you designs to be written.</p>
+</div>
+<div class="section" id="generating-complementary-rotamers-for-design">
+<h2>Generating Complementary Rotamers for Design<a class="headerlink" href="#generating-complementary-rotamers-for-design" title="Permalink to this headline">¶</a></h2>
+<p>The <cite>design</cite> command uses the following function to generate complementary rotamers from a specified contact pool and
+protein-ligand complex:</p>
+<dl class="function">
+<dt id="BindingSitesFromFragments.design.generate_fuzzball_contact_rotamersets">
+<code class="sig-prename descclassname">BindingSitesFromFragments.design.</code><code class="sig-name descname">generate_fuzzball_contact_rotamersets</code><span class="sig-paren">(</span><em class="sig-param">ligand_conformer_path</em>, <em class="sig-param">match_path</em>, <em class="sig-param">match_pose</em>, <em class="sig-param">sfxn</em>, <em class="sig-param">match_residue_map</em>, <em class="sig-param">flag_special_rot=True</em>, <em class="sig-param">custom_taskop=None</em>, <em class="sig-param">rotset_limit=200</em>, <em class="sig-param">contact_method='RMSD'</em>, <em class="sig-param">RMSD_limit=1.5</em>, <em class="sig-param">apply_minimization=False</em>, <em class="sig-param">dump_rotamerset_pdb=False</em>, <em class="sig-param">report_stats=False</em>, <em class="sig-param">defined_positions=None</em><span class="sig-paren">)</span><a class="headerlink" href="#BindingSitesFromFragments.design.generate_fuzzball_contact_rotamersets" title="Permalink to this definition">¶</a></dt>
+<dd><p>Generate rotamers that recapitulate observed fuzzball contacts for each position in a nucleated match</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ligand_conformer_path</strong> – path to ligand generated by molfile_to_params.py</p></li>
+<li><p><strong>flag_special_rot</strong> – If true, flag rotamers as SPECIAL_ROT variants</p></li>
+<li><p><strong>custom_taskop</strong> – list of task operations to apply to the PackerTask used to generate rotamers</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>viable_rotamers dictionary of rotamers organized by position and residue identity</p>
+</dd>
+</dl>
+</dd></dl>
+
+<p>In this protocol, complementary rotamers are simply added to the Packer RotamerSets. The essential bits of code are
+as follows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create a new RotamerSets</span>
+<span class="n">rotamer_sets</span> <span class="o">=</span> <span class="n">rosetta</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">pack</span><span class="o">.</span><span class="n">rotamer_set</span><span class="o">.</span><span class="n">RotamerSetsFactory</span><span class="o">.</span><span class="n">create_rotamer_sets</span><span class="p">(</span><span class="n">match_pose</span><span class="p">)</span>
+<span class="n">rotamer_sets</span><span class="o">.</span><span class="n">set_task</span><span class="p">(</span><span class="n">design_packer_task</span><span class="p">)</span>
+<span class="n">rotamer_sets</span><span class="o">.</span><span class="n">initialize_pose_for_rotsets_creation</span><span class="p">(</span><span class="n">match_pose</span><span class="p">)</span>
+<span class="n">rotamer_sets</span><span class="o">.</span><span class="n">build_rotamers</span><span class="p">(</span><span class="n">match_pose</span><span class="p">,</span> <span class="n">sfxn</span><span class="p">,</span> <span class="n">packer_neighbor_graph</span><span class="p">)</span>
+
+<span class="c1"># Add complementary rotamers to RotamerSets</span>
+<span class="k">if</span> <span class="n">use_complementary_rotsets</span><span class="p">:</span>
+    <span class="k">for</span> <span class="n">position</span> <span class="ow">in</span> <span class="n">viable_rotamers</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">design_packer_task</span><span class="o">.</span><span class="n">design_residue</span><span class="p">(</span><span class="n">position</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Adding complementary rotamers for position </span><span class="si">{position}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">position_rotamer_set</span> <span class="o">=</span> <span class="n">rotamer_sets</span><span class="o">.</span><span class="n">rotamer_set_for_residue</span><span class="p">(</span><span class="n">position</span><span class="p">)</span>
+
+            <span class="c1"># Add fuzzball rotamers to the appropriate rotamer_set in rotamer_sets</span>
+            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">position_rotamer_set</span><span class="o">.</span><span class="n">resid</span><span class="p">())</span> <span class="o">==</span> <span class="n">position</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">residue_type</span> <span class="ow">in</span> <span class="n">viable_rotamers</span><span class="p">[</span><span class="n">position</span><span class="p">]:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Adding {len(viable_rotamers[position][residue_type])} </span><span class="si">{residue_type}</span><span class="s1"> rotamers at position </span><span class="si">{position}</span><span class="s1">.&#39;</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">fuzz_rotamer</span> <span class="ow">in</span> <span class="n">viable_rotamers</span><span class="p">[</span><span class="n">position</span><span class="p">][</span><span class="n">residue_type</span><span class="p">]:</span>
+                        <span class="n">position_rotamer_set</span><span class="o">.</span><span class="n">add_rotamer_into_existing_group</span><span class="p">(</span><span class="n">fuzz_rotamer</span><span class="p">)</span>
+
+<span class="c1"># Copy pose for design</span>
+<span class="n">design_pose</span> <span class="o">=</span> <span class="n">match_pose</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+<span class="n">design_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">designdir</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{match_name}</span><span class="s1">-</span><span class="si">{i}</span><span class="s1">.pdb&#39;</span><span class="p">)</span>
+
+<span class="c1"># Perform design</span>
+<span class="n">sfxn</span><span class="o">.</span><span class="n">setup_for_packing_with_rotsets</span><span class="p">(</span><span class="n">design_pose</span><span class="p">,</span> <span class="n">rotamer_sets</span><span class="p">)</span>
+<span class="n">rotamer_sets</span><span class="o">.</span><span class="n">prepare_sets_for_packing</span><span class="p">(</span><span class="n">design_pose</span><span class="p">,</span> <span class="n">sfxn</span><span class="p">)</span>
+<span class="n">ig</span> <span class="o">=</span> <span class="n">rosetta</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">pack</span><span class="o">.</span><span class="n">interaction_graph</span><span class="o">.</span><span class="n">InteractionGraphFactory</span><span class="o">.</span><span class="n">create_and_initialize_annealing_graph</span><span class="p">(</span><span class="n">design_packer_task</span><span class="p">,</span> <span class="n">rotamer_sets</span><span class="p">,</span> <span class="n">design_pose</span><span class="p">,</span> <span class="n">sfxn</span><span class="p">,</span> <span class="n">packer_neighbor_graph</span><span class="p">)</span>
+<span class="n">rosetta</span><span class="o">.</span><span class="n">core</span><span class="o">.</span><span class="n">pack</span><span class="o">.</span><span class="n">pack_rotamers_run</span><span class="p">(</span><span class="n">design_pose</span><span class="p">,</span> <span class="n">design_packer_task</span><span class="p">,</span> <span class="n">rotamer_sets</span><span class="p">,</span> <span class="n">ig</span><span class="p">)</span>
+<span class="n">ig</span><span class="o">.</span><span class="n">clean_up_after_packing</span><span class="p">(</span><span class="n">design_pose</span><span class="p">)</span>
+<span class="n">sfxn</span><span class="p">(</span><span class="n">design_pose</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>We generate a new RotamerSets using the RotamerSets factory and then add rotamers to each position’s RotamerSet based on
+what is returned by <cite>generate_fuzzball_contact_rotamersets()</cite>. This augmented RotamerSets is then passed to the Packer
+<cite>pack_rotamers_run</cite> method.</p>
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+      
+        <a href="Match.html" class="btn btn-neutral float-left" title="Match Binding Sites to Scaffolds" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2020, James Lucas
+
+    </p>
+  </div>
+  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>
