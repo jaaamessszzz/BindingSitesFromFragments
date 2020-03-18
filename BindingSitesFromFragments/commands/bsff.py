@@ -61,12 +61,10 @@ def main():
         from .bsff_search import search
         search(docopt(search.__doc__, argv=argv))
 
-    #todo: implement
     if argv[0] == 'align':
         from .bsff_align import align
         align(docopt(align.__doc__, argv=argv))
 
-    #todo: implement
     if argv[0] == 'cluster':
         from .bsff_cluster import clustering
         clustering(docopt(clustering.__doc__, argv=argv))

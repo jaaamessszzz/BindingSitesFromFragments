@@ -15,7 +15,7 @@ def assemble(args):
     Build a fuzzball using the best scoring side chain interactions with the defined ligand
 
     NOTE: if you are building a fuzzball for an existing protein-ligand complex (i.e. a complex from the PDB, really
-    any proten-ligand complex not created by the protocol!) you must generate a new params file for the ligand!
+    any protein-ligand complex not created by the protocol!) you must generate a new params file for the ligand!
 
     Usage:
       bsff assemble <user_defined_dir> [options]

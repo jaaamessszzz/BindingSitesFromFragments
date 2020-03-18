@@ -21,9 +21,6 @@ from pyrosetta import rosetta
 def montecarlo_motif(user_defined_dir, fuzzball_path, motif_size, block_count=None, include_defined=False, solutions=100000):
     """
     Use PyRosetta and a simulated annealing monte carlo method to find binding site solutions.
-    This method for finding binding motif solutions DOES NOT TAKE CONSTRAINTS INTO CONSIDERATION. This means motif
-    residues may clash (residue-residue 2b REU > 0) and there is little control over binding motif composition i.e.
-    hydrogen bonding residues will be seldomly included. Use Gurobi if this is necessary.
 
     :param user_defined_dir: Path to project root directory
     :param fuzzball_path: Path to directory containing fuzzballs for current iteration

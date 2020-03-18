@@ -27,7 +27,6 @@ def mc_solve(args):
     """
     Produce binding motif solutions using a simulated annealing monte carlo protocol
 
-
     Usage:
       bsff mcsolve <user_defined_dir> <current_iteration_fuzzball_dir> <motif_size> [options]
 

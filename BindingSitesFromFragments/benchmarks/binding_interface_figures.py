@@ -10,6 +10,7 @@ from pprint import pprint
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import pandas as pd
 import prody
 from prody.sequence.sequence import Sequence
@@ -88,6 +89,7 @@ def jsd_figures(args):
 
     Options:
       -o=<outdir>, --output=<output>        Name of directory to output figures
+      -r, --nonredundant                    Use non-redundant set of complexes to generate figures
     """
 
     stats_dir = args['<statistics_dir>']
@@ -98,6 +100,13 @@ def jsd_figures(args):
 
     # Consolidate csvs into one dataframe
     all_csvs = [os.path.join(stats_dir, csv) for csv in os.listdir(stats_dir) if csv.endswith('.csv')]
+
+    if args['--nonredundant']:
+        print('\n\n\nUSING NON_REDUNDANT COMPLEX SET!!!\n\n\n')
+        nonredundant_complexes = ['6M9B', '5T52', '1LNM', '5HZ8', '3OKI', '4AFH', '2QRY', '3CZ1', '2XN3']
+        all_csvs = [csv for csv in all_csvs if any(cpx.upper() in csv.upper() for cpx in nonredundant_complexes)]
+        print(all_csvs)
+
     df_list = [pd.read_csv(csv) for csv in all_csvs]
     df_all = pd.concat(df_list)
 
@@ -116,9 +125,23 @@ def jsd_figures(args):
         sns.despine(left=True)
 
         ax.set_ylim(0, 1)
-        plt.xlabel('Weights')
+        plt.xlabel('special_rot Bonus')
         plt.ylabel('Profile Similarity')
         fig.savefig(os.path.join(ps_boxplot_dir, f'ProfileSimilarity-{output_name if output_name else complex_name}.png'), bbox_inches='tight')
+        plt.close()
+
+        # Also make violinplot because asdf
+        fig, ax = plt.subplots()
+        violinplot = sns.violinplot(x=df['weight'], y=df['similarity'],
+                              order=['Control', '0.0', '-0.5', '-1.0', '-1.5', '-2.0', '-2.5', '-3.0', '-3.5', '-4.0',
+                                     '-4.5', '-5.0', '-6.0', '-8.0', '-10.0'], ax=ax)
+        violinplot.set_xticklabels(boxplot.get_xticklabels(), rotation=45)
+        sns.despine(left=True)
+
+        ax.set_ylim(0, 1)
+        plt.xlabel('special_rot Bonus')
+        plt.ylabel('Profile Similarity')
+        fig.savefig(os.path.join(ps_boxplot_dir, f'ProfileSimilarity-ViolinPlot-{output_name if output_name else complex_name}.png'), bbox_inches='tight')
         plt.close()
 
     for df in df_list:
@@ -219,7 +242,7 @@ def jsd_figures(args):
 
         fig = barplot.get_figure()
         plt.ylim(0, 1)
-        plt.xlabel('Weights')
+        plt.xlabel('special_rot Bonus')
         plt.ylabel('Fraction Recovered')
         fig.savefig(os.path.join(sr_barchart_dir, f'SeqeuenceRecovery-{output_name if output_name else complex_name}.png'), bbox_inches='tight')
         plt.close()
@@ -274,7 +297,7 @@ def entropy_binned_profile_similarity(df_all):
     sns.despine(left=True)
 
     fig = boxplot.get_figure()
-    plt.xlabel('Weights')
+    plt.xlabel('special_rot Bonus')
     plt.ylabel('Profile Similarity')
     fig.savefig(f'EntropyBinnedProfileSimilarity.png', bbox_inches='tight', dpi=300)
     plt.close()
@@ -370,9 +393,7 @@ def design_metric_histograms(args):
       <benchmark_dir>           Root Directory
 
     Options:
-      -b, --hbonds              Look for ligand hbonds counts
       -c, --complex_column      Create complex column derived from output PDB name
-      -h, --holes               Use Holes filter
       -w, --weights             Only plot the specified weights
     """
     benchmark_dir = args['<benchmark_dir>']
@@ -409,44 +430,59 @@ def design_metric_histograms(args):
     metrics = {0: {0: 'bindingstrain',
                    1: 'residueie',
                    2: 'packstat',
-                   3: 'heavyburiedunsats',
                    },
                1: {0: 'ligand_sasa',
-                   1: 'shapecomplementarity'}
+                   1: 'shapecomplementarity',
+                   2: 'holes',
+                   },
+               2: {0: 'heavyburiedunsats',
+                   1: 'hbonds',
+                   2: 'incorporated_specialrot'}
                }
 
-    if args['--holes']:
-        metrics[1][2] = 'holes'
-    if args['--hbonds']:
-        metrics[1][3] = 'hbonds'
-
+    UCSF_palette = ['#EB093C', '#007CBE', '#716FB2', '#6EA400', '#F26D04']
+    palette_dict = {'Control': '#EB093C',
+                    0.0: '#007CBE',
+                    -1.5: '#716FB2',
+                    -3.0: '#6EA400',
+                    -4.0: '#F26D04'
+                    }
     for complex, complex_df in df.groupby(['match']):
-        fig, axes = plt.subplots(2, 4, figsize=(8, 4), constrained_layout=True)
+        fig, axes = plt.subplots(3, 3, figsize=(7, 7), constrained_layout=True)
         for x in metrics:
             for y in metrics[x]:
 
-                if (x, y) != (1, 3):
-                    sns.violinplot(complex_df[metrics[x][y]], complex_df['specialrot'],
+                if (x, y) not in [(2, 0), (2, 1), (2, 2)]:
+                    sns.violinplot(complex_df[metrics[x][y]], complex_df['specialrot'], palette=UCSF_palette,
                                    order=['Control', 0.0, -1.5, -3.0, -4.0], ax=axes[x, y])
+
                 else:
-                    for weight, weight_df in complex_df.groupby(['specialrot']):
-                        plot_kde = True if len(weight_df['hbonds'].unique()) > 1 else False
-                        sns.distplot(weight_df['hbonds'], ax=axes[x, y], kde=plot_kde, kde_kws={"label": f'{weight}'})
+                    if (x, y) == (2, 0):
+                        sns.countplot(complex_df['heavyburiedunsats'].astype(int), ax=axes[x, y], hue=complex_df['specialrot'],
+                                      hue_order=['Control', 0.0, -1.5, -3.0, -4.0], palette=UCSF_palette)
+
+                        for label in axes[x, y].get_xaxis().get_ticklabels()[::2]:
+                            label.set_visible(False)
+
+                    if (x, y) == (2, 1):
+                        sns.countplot(complex_df['hbonds'].astype(int), ax=axes[x, y], hue=complex_df['specialrot'],
+                                      hue_order=['Control', 0.0, -1.5, -3.0, -4.0], palette=UCSF_palette)
+                    if (x, y) == (2, 2):
+                        sns.countplot(complex_df['incorporated_specialrot'].astype(int), ax=axes[x, y], hue=complex_df['specialrot'],
+                                      hue_order=['Control', 0.0, -1.5, -3.0, -4.0], palette=UCSF_palette)
+                    axes[x, y].legend().remove()
 
                 if y != 0:
                     axes[x, y].set_ylabel('')
 
-                if (x, y) == (0, 0):
-                    handles, labels = axes[x, y].get_legend_handles_labels()
-                if axes[x, y].get_legend():
-                    axes[x, y].get_legend().remove()
+        handles = [Patch(facecolor=color, edgecolor='k', label=label) for color, label in zip(UCSF_palette, ['Control', 0.0, -1.5, -3.0, -4.0])]
+        lgd = fig.legend(handles, ['Control', 0.0, -1.5, -3.0, -4.0], loc='center right', title='special_rot', ncol=1, bbox_to_anchor=(1.2, 0.5))
+        # ttl = fig.suptitle(f'{complex}')
 
-        lgd = fig.legend(handles, labels, loc='center right', title='special_rot', ncol=1, bbox_to_anchor=(1.15, 0.5))
-        ttl = fig.suptitle(f'{complex}')
-        fig.savefig(f'{complex}-designmetrics.png', bbox_extra_artist=[lgd, ttl], bbox_inches='tight', dpi=300)
+        fig.savefig(f'{complex}-designmetrics.png', bbox_extra_artist=[lgd,], bbox_inches='tight', dpi=300)  # ttl
 
-    # Print Agg median/counts
-    # Maintext figures
+    # --- Maintext figures --- #
+
     maintext_metrics = {0: {0: 'shapecomplementarity',
                             1: 'holes',
                             2: 'ligand_sasa',
@@ -460,12 +496,12 @@ def design_metric_histograms(args):
 
     # Duplicate code because I'm so over this
     for complex, complex_df in df.groupby(['match']):
-        fig, axes = plt.subplots(1, 4, figsize=(7, 2.5), constrained_layout=True, sharey='row')
+        fig, axes = plt.subplots(1, 3, figsize=(6, 2.5), constrained_layout=True, sharey='row')
         for x in maintext_metrics:
             for y in maintext_metrics[x]:
-
                 plot_order = [-4.0, -3.0, -1.5, 0.0, 'Control']
-                sns.violinplot(complex_df[maintext_metrics[x][y]], complex_df['specialrot'], order=plot_order, ax=axes[y])
+                sns.violinplot(complex_df[maintext_metrics[x][y]], complex_df['specialrot'], order=plot_order, ax=axes[y],
+                               palette=['#007CBE', '#007CBE', '#007CBE', '#6EA400', '#EB093C',])
                 axes[y].set_xlabel(xlabels[y])
                 if y == 0:
                     axes[y].set_ylabel('special_rot (REU)')
@@ -474,13 +510,209 @@ def design_metric_histograms(args):
 
                 if axes[y].get_legend():
                     axes[y].get_legend().remove()
-        axes[3].invert_yaxis()
 
-        ttl = fig.suptitle(f'{complex}')
-        fig.savefig(f'Maintext-{complex}-designmetrics.png', bbox_extra_artist=[ttl], bbox_inches='tight', dpi=300)
+                # https://github.com/mwaskom/seaborn/issues/979
+                # for patch in axes[y].artists:
+                #     r, g, b, a = patch.get_facecolor()
+                #     patch.set_facecolor((r, g, b, .5))
 
-    # Joint Plots for maintext metrics
+        axes[2].invert_yaxis()
 
+        # ttl = fig.suptitle(f'{complex}')
+        fig.savefig(f'Maintext-{complex}-designmetrics.png', bbox_inches='tight', dpi=300) # bbox_extra_artist=[ttl]
+
+        # --- Joint Plots for maintext metrics --- #
+
+        control_df = complex_df.groupby(['specialrot']).get_group('Control')
+        plot_metrics = ['shapecomplementarity', 'holes', 'ligand_sasa', 'incorporated_specialrot']
+        for weight, weight_df in complex_df.groupby(['specialrot']):
+            metrics = plot_metrics[:-1] if weight == 0 else plot_metrics
+            subplot_dim = len(metrics)
+
+            print(metrics, subplot_dim)
+
+            if weight != 'Control':
+                joint_df = pd.concat([control_df, weight_df])
+                fig, axes = plt.subplots(subplot_dim, subplot_dim, figsize=(8, 8), constrained_layout=True, sharex='col', sharey='row',)
+                for x in range(subplot_dim):
+                    for y in range(subplot_dim):
+                        # Distplot on diagonals
+                        if x == 3 and y == 3:
+                            twin_ax = axes[x, y].twinx()
+                            twin_ax.set_axis_off()
+                            sns.countplot(joint_df['incorporated_specialrot'].astype(int), ax=twin_ax, hue=joint_df['specialrot'],
+                                          hue_order=['Control', weight], palette=['#EB093C', '#007CBE'])
+                            twin_ax.get_legend().remove()
+
+                        elif x == y:
+                            twin_ax = axes[x, y].twinx()
+                            twin_ax.set_axis_off()
+                            sns.distplot(control_df[metrics[x]], color='#EB093C', ax=twin_ax, kde=False)
+                            sns.distplot(weight_df[metrics[x]], color='#007CBE', ax=twin_ax, kde=False)
+
+                        # Violin plot for specialrot_incorporation
+                        elif x == 3:
+                            sns.violinplot(joint_df[metrics[y]], joint_df['incorporated_specialrot'], hue=joint_df['specialrot'],
+                                           orient='h', scale="width", split=True, palette=['#EB093C', '#007CBE'], ax=axes[x, y])
+                        elif y == 3:
+                            sns.violinplot(joint_df['incorporated_specialrot'], joint_df[metrics[x]], hue=joint_df['specialrot'],
+                                           scale="width", split=True, palette=['#EB093C', '#007CBE'], ax=axes[x, y])
+                        else:
+                            sns.scatterplot(joint_df[metrics[y]], joint_df[metrics[x]], hue=joint_df['specialrot'],
+                                            palette=['#EB093C', '#007CBE'], ax=axes[x, y], alpha=0.3, s=5, edgecolor='none')
+
+                        if axes[x, y].get_legend():
+                            axes[x, y].get_legend().remove()
+
+                        if 0 < y < subplot_dim:
+                            axes[x, y].set_ylabel('')
+                        if x < subplot_dim - 1:
+                            axes[x, y].set_xlabel('')
+                            
+                        axes[x, y].invert_yaxis()
+                        axes[x, y].invert_yaxis()
+
+                axes[0, 0].set_ylabel('shapecomplementarity')
+                if subplot_dim == 4:
+                    axes[subplot_dim - 1, subplot_dim - 1].set_xlabel('incorporated_specialrot')
+                if subplot_dim == 3:
+                    axes[subplot_dim - 1, subplot_dim - 1].set_xlabel('shapecomplementarity')
+
+                handles = [Patch(facecolor=color, edgecolor='k', label=label) for color, label in zip(['#EB093C', '#007CBE'], ['Control', weight])]
+                lgd = fig.legend(handles, ['Control', weight], loc='center right', title='special_rot', ncol=1, bbox_to_anchor=(1.2, 0.5))
+
+                fig.savefig(f'{complex}-{str(abs(weight)).replace(".","")}_Subplots.png', dpi=300, bbox_extra_artist=[lgd], bbox_inches='tight')
+                plt.close()
+
+        # Print nice designs
+        if complex == 'UM_1_W27Y49F124_122_2rcdA_NPS_0005-iter_0-fuzz_0-1_140_1081_2929_1':
+            design_df = complex_df[(complex_df['shapecomplementarity'] > 0.8) & (complex_df['holes'] < -1.5) & (complex_df['ligand_sasa'] < 10)]
+            design_df.to_csv(f'{complex}-Filtered.csv')
+
+        if complex == 'UM_1_L27L98L132_174_1jkgA_IM4_0007-iter_0-fuzz_0-1_794_1164_1278_1':
+            design_df = complex_df[(complex_df['shapecomplementarity'] > 0.75) & (complex_df['holes'] < -1.5) & (complex_df['ligand_sasa'] < 25)]
+            design_df.to_csv(f'{complex}-Filtered.csv')
+
+    # Aggregate Results
+    df_sc_pivot = pd.pivot_table(df, values=['shapecomplementarity', 'holes', 'ligand_sasa',
+                                             'bindingstrain', 'hbonds', 'heavyburiedunsats',
+                                             'incorporated_specialrot', 'packstat', 'residueie'], index=['match', 'specialrot'],
+                                 aggfunc={'shapecomplementarity': [np.median],
+                                          'holes': [np.median],
+                                          'ligand_sasa': [np.median],
+                                          'bindingstrain': [np.median],
+                                          'hbonds': [np.median],
+                                          'heavyburiedunsats': [np.median],
+                                          'incorporated_specialrot': [np.median],
+                                          'packstat': [np.median],
+                                          'residueie': [np.median]
+                                          })
+    df_sc_pivot.to_csv('DesignMetrics_Pivot.csv')
+
+    # --- Summary median improvement counts --- #
+
+    summary_dict = {}
+    for weight in [0, -1.5, -3.0, -4.0]:
+        summary_dict[weight] = {}
+        metric_list = ['sc', 'holes', 'sasa', 'bindingstrain', 'hbonds', 'heavyburiedunsats', 'packstat', 'residueie', 'shapecomplementarity']
+        for metric in metric_list:
+            summary_dict[weight][metric] = {}
+            summary_dict[weight][metric]['improved'] = 0
+            summary_dict[weight][metric]['decrease'] = 0
+
+    # Max jank pandas-ness
+    for match, match_df in df_sc_pivot.groupby('match'):
+        control_row = match_df.xs('Control', axis=0, level=1, drop_level=False)
+        for (match, specialrot), row in match_df.iterrows():
+            if specialrot != 'Control' and match != 'UM_1_L27L98L132_127_1jkgA_IM4_0007-iter_0-fuzz_0-1_794_1164_1278_1':
+
+                # Straight up improvement in medians
+                if row['shapecomplementarity', 'median'] - control_row['shapecomplementarity', 'median'].iloc[0] > 0:
+                    summary_dict[float(specialrot)]['shapecomplementarity']['improved'] += 1
+                else:
+                    summary_dict[float(specialrot)]['shapecomplementarity']['decrease'] += 1
+
+                if row['ligand_sasa', 'median'] - control_row['ligand_sasa', 'median'].iloc[0] < 0:
+                    summary_dict[float(specialrot)]['sasa']['improved'] += 1
+                else:
+                    summary_dict[float(specialrot)]['sasa']['decrease'] += 1
+
+                if row['bindingstrain', 'median'] - control_row['bindingstrain', 'median'].iloc[0] < 0:
+                        summary_dict[float(specialrot)]['bindingstrain']['improved'] += 1
+                else:
+                        summary_dict[float(specialrot)]['bindingstrain']['decrease'] += 1
+
+                if row['packstat', 'median'] - control_row['packstat', 'median'].iloc[0] > 0:
+                        summary_dict[float(specialrot)]['packstat']['improved'] += 1
+                else:
+                        summary_dict[float(specialrot)]['packstat']['decrease'] += 1
+
+                if row['residueie', 'median'] - control_row['residueie', 'median'].iloc[0] < 0:
+                        summary_dict[float(specialrot)]['residueie']['improved'] += 1
+                else:
+                        summary_dict[float(specialrot)]['residueie']['decrease'] += 1
+
+                # Holes...
+                if row['holes', 'median'] - control_row['holes', 'median'].iloc[0] < 0:
+                    summary_dict[float(specialrot)]['holes']['improved'] += 1
+                else:
+                    summary_dict[float(specialrot)]['holes']['decrease'] += 1
+
+                # Counts
+                if control_row['hbonds', 'median'].iloc[0] < row['hbonds', 'median']:
+                    summary_dict[float(specialrot)]['hbonds']['improved'] += 1
+                if control_row['hbonds', 'median'].iloc[0] > row['hbonds', 'median']:
+                    summary_dict[float(specialrot)]['hbonds']['decrease'] += 1
+
+                if control_row['heavyburiedunsats', 'median'].iloc[0] > row['heavyburiedunsats', 'median']:
+                    summary_dict[float(specialrot)]['heavyburiedunsats']['improved'] += 1
+                if control_row['heavyburiedunsats', 'median'].iloc[0] < row['heavyburiedunsats', 'median']:
+                    summary_dict[float(specialrot)]['heavyburiedunsats']['decrease'] += 1
+
+                # +/-10% to determine Improvement/Impairment
+                # if abs(row['shapecomplementarity', 'median'] / control_row['shapecomplementarity', 'median'].iloc[0]) > 1.1:
+                #     summary_dict[float(specialrot)]['shapecomplementarity']['improved'] += 1
+                # if abs(row['shapecomplementarity', 'median'] / control_row['shapecomplementarity', 'median'].iloc[0]) < 0.9:
+                #     summary_dict[float(specialrot)]['shapecomplementarity']['decrease'] += 1
+                #
+                # if abs(row['ligand_sasa', 'median'] / control_row['ligand_sasa', 'median'].iloc[0]) < 0.9:
+                #     summary_dict[float(specialrot)]['sasa']['improved'] += 1
+                # if abs(row['ligand_sasa', 'median'] / control_row['ligand_sasa', 'median'].iloc[0]) > 1.1:
+                #     summary_dict[float(specialrot)]['sasa']['decrease'] += 1
+                #
+                # if abs(row['bindingstrain', 'median'] / control_row['bindingstrain', 'median'].iloc[0]) < 0.9:
+                #         summary_dict[float(specialrot)]['bindingstrain']['improved'] += 1
+                # if abs(row['bindingstrain', 'median'] / control_row['bindingstrain', 'median'].iloc[0]) > 1.1:
+                #         summary_dict[float(specialrot)]['bindingstrain']['decrease'] += 1
+                #
+                # if abs(row['packstat', 'median'] / control_row['packstat', 'median'].iloc[0]) > 1.1:
+                #         summary_dict[float(specialrot)]['packstat']['improved'] += 1
+                # if abs(row['packstat', 'median'] / control_row['packstat', 'median'].iloc[0]) < 0.9:
+                #         summary_dict[float(specialrot)]['packstat']['decrease'] += 1
+                #
+                # if abs(row['residueie', 'median'] / control_row['residueie', 'median'].iloc[0]) < 0.9:
+                #         summary_dict[float(specialrot)]['residueie']['improved'] += 1
+                # if abs(row['residueie', 'median'] / control_row['residueie', 'median'].iloc[0]) > 1.1:
+                #         summary_dict[float(specialrot)]['residueie']['decrease'] += 1
+                #
+                # # Holes...
+                # if row['holes', 'median'] - control_row['holes', 'median'].iloc[0] < -0.25:
+                #     summary_dict[float(specialrot)]['holes']['improved'] += 1
+                # if row['holes', 'median'] - control_row['holes', 'median'].iloc[0] > 0.25:
+                #     summary_dict[float(specialrot)]['holes']['decrease'] += 1
+                #
+                # # Counts
+                # if control_row['hbonds', 'median'].iloc[0] < row['hbonds', 'median']:
+                #     summary_dict[float(specialrot)]['hbonds']['improved'] += 1
+                # if control_row['hbonds', 'median'].iloc[0] > row['hbonds', 'median']:
+                #     summary_dict[float(specialrot)]['hbonds']['decrease'] += 1
+                #
+                # if control_row['heavyburiedunsats', 'median'].iloc[0] > row['heavyburiedunsats', 'median']:
+                #     summary_dict[float(specialrot)]['heavyburiedunsats']['improved'] += 1
+                # if control_row['heavyburiedunsats', 'median'].iloc[0] < row['heavyburiedunsats', 'median']:
+                #     summary_dict[float(specialrot)]['heavyburiedunsats']['decrease'] += 1
+
+    pprint(summary_dict)
 
 def alignment_sequence_logo(args):
     """
@@ -529,6 +761,12 @@ def alignment_sequence_logo(args):
 
         logo_binary = weblogo.logo_formatter.eps_formatter(logodata, logoformat)
         sequencelogo_out_path = os.path.join(outdir, f'{fasta_name}.eps')
+        print(sequencelogo_out_path)
+        with open(sequencelogo_out_path, 'wb') as f:
+            f.write(logo_binary)
+
+        logo_binary = weblogo.logo_formatter.pdf_formatter(logodata, logoformat)
+        sequencelogo_out_path = os.path.join(outdir, f'{fasta_name}.pdf')
         print(sequencelogo_out_path)
         with open(sequencelogo_out_path, 'wb') as f:
             f.write(logo_binary)

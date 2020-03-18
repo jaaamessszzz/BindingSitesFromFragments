@@ -74,7 +74,7 @@ def fragment_representation_bm(args):
 
     if args['figures']:
         png_dir = generate_fragment_pngs(user_defined_dir)
-        generate_cluster_counts_hist(clusters_dir, format_maintext=args['--maintext'])
+        # generate_cluster_counts_hist(clusters_dir, format_maintext=args['--maintext'])
         generate_auc_figures(args['<bm_csv_dir>'], png_dir, error_bands=args['--error_bands'], format_maintext=args['--maintext'])
 
     else:
@@ -204,13 +204,13 @@ def generate_cluster_counts_hist(clusters_dir, format_maintext=False):
         df.sort_values(by=['cluster_members'], ascending=False, inplace=True)
 
         fig = plt.figure()
-        ax = sns.barplot(x=list(range(len(df['cluster_members']))), y=df['cluster_members'])
+        ax = sns.barplot(x=list(range(1, len(df['cluster_members']) + 1)), y=df['cluster_members'], palette=['#007CBE']*len(df['cluster_members']))
 
         ax.set(ylim=(0, df['cluster_members'].max()))
         ax.set(xlim=(0, len(df['cluster_members'])))
 
         # 5% Vertical line
-        plt.axvline(x=len(df['cluster_members'])/20)
+        plt.axvline(x=len(df['cluster_members'])/20, color='#EB093C')
 
         x_clusters = len(df['cluster_members'])
         x_cluster_ticks = len(df['cluster_members']) // 10
@@ -235,6 +235,8 @@ def generate_auc_figures(bm_csv_dir, png_dir, error_bands=False, format_maintext
     :param df:
     :return:
     """
+    global fraction
+    fraction_recovery_list = []
 
     annotation_x_positions = (0.3, 0.3, 0.3, 0.3, 0.3) if format_maintext else (0.3, 0.3, 0.3, 0.2, 0.2)
     annotation_y_positions = (0.33, 0.26, 0.19, 0.12, 0.05) if format_maintext else (0.3, 0.25, 0.2, 0.15, 0.1, 0.05)
@@ -270,6 +272,7 @@ def generate_auc_figures(bm_csv_dir, png_dir, error_bands=False, format_maintext
                 for fraction, fraction_df in fragment_df.groupby('fraction'):
                     avg_recovered = fraction_df['recovered'].mean()
                     if avg_recovered > 0.8: break
+                fraction_recovery_list.append({'fraction': fraction, 'fragment': fragment})
 
                 # AUC calculation
                 # auc_info = [(fraction, recovered['recovered'].mean()) for fraction, recovered in fragment_df.groupby('fraction')]
@@ -285,8 +288,8 @@ def generate_auc_figures(bm_csv_dir, png_dir, error_bands=False, format_maintext
                     muh_plot.add_artist(ab)
 
                 # Add annotations
-                if not format_maintext:
-                    muh_plot.text(annotation_x_positions[0], annotation_y_positions[0], f'{fragment}')
+                # if not format_maintext:
+                #     muh_plot.text(annotation_x_positions[0], annotation_y_positions[0], f'{fragment}')
 
                 muh_plot.text(annotation_x_positions[1], annotation_y_positions[1], f'Total Residues: {fragment_df["total_residues"].median():.0f}')
                 muh_plot.text(annotation_x_positions[2], annotation_y_positions[2], f'Total Clusters: {fragment_df["total_clusters"].median():.0f}')
@@ -300,6 +303,21 @@ def generate_auc_figures(bm_csv_dir, png_dir, error_bands=False, format_maintext
                 figure_name = f'{fragment}-cluster_recovery-{"band" if error_bands else "bars"}.png'
                 fig.savefig(figure_name, dpi=600, bbox_inches='tight', transparent=True)
                 plt.close()
+
+    # Fraction recovered Histogram
+    df = pd.DataFrame(fraction_recovery_list)
+
+    sns.set(style="whitegrid", palette="hls")
+    sns.set_context("paper", font_scale=1.5)
+
+    fig, ax = plt.subplots(figsize=(6,6))
+    sns.countplot(df['fraction'].round(2), color='#007CBE', ax=ax)
+    fig.suptitle('Fraction of PDB Required for >80%\nContact Recovery Across All Tested Fragments')
+    ax.set_xlabel('Fraction', fontsize=12)
+    ax.set_ylabel('Count', fontsize=12)
+
+    fig.savefig('RecoveryHist.tiff', dpi=300)
+    df.to_csv('FractionRecovered.csv')
 
 
 # todo: how do I embed these into the plots?

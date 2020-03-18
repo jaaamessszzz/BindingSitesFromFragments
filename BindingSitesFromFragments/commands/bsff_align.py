@@ -6,10 +6,9 @@ from ..alignments import Align_PDB_Factory
 
 def align(args):
     """
-    Identify fragment substructures and align onto defined reference fragments
-
-    This step of the protocol takes the search results from the previous step and either downloads structures using the PDB
-    FTP server or a local copy of the PDB.
+    Identify fragment substructures and align onto defined reference fragments. This step of the protocol takes the
+    search results from the previous step and either downloads structures using the PDB FTP server or a local copy of
+    the PDB.
 
     Usage: bsff align <user_defined_dir> [options]
 

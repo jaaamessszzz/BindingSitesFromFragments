@@ -26,6 +26,7 @@ def design(args):
       -l=<limit>, --rotset_limit=<limit>            Limit of rotamers added per residue identity per position
       -m, --apply_minimization                      Apply minimization before accepting/rejecting rotamers
       -n=<nstruct>, --nstruct=<nstruct>             Number of design trajectories to attempt
+      -r=<rmsd>, --rmsd=<rmsd>                      RMSD to use for accepting complementary rotamerset rotamers
       -w=<weight>, --special_rot_weight=<weight>    Weight for complementary rotamers during design
       -x, --disable_rotamersets                     Don't use complementary rotamersets during design
     """
