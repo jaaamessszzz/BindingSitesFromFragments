@@ -39,7 +39,7 @@ setup(
         'pypdb',
         'pandas',
         'biopython',
-        'seaborn'
+        'seaborn',
         'multiprocess',
         'networkx',
         'pathos',
