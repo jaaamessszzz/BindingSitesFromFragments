@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
-import pandas as pd
-import pypdb
 import json
-import pubchempy
-import xmltodict
+import os
 from pprint import pprint
 import urllib
-import os
 
+import pandas as pd
+import pubchempy
+import pypdb
 from rdkit import Chem
+import requests
+import xmltodict
 
 from .utils import *
 
@@ -211,9 +212,73 @@ class Fragments(object):
         with open(os.path.join(self.user_defined_dir, 'PDB_search_results.json'), 'w') as jsonfile:
             json.dump(pdb_dict, jsonfile)
 
-    def search_PDBs(self, ligand_pdbid_list):
+    def search_PDBs(self, ligand_pdbid_set):
         """
         Download all PDBs with the provided fragment-containing ligand
+        :param ligand_pdbid: three character PDBID for the fragment-containing ligand
+        :return:
+        """
+        ligand_pdbid_list = list(ligand_pdbid_set)
+        search_dict = {"query": {
+            "type": "group",
+            "logical_operator": "and",
+            "nodes": [
+                { # Chemical component IDs for substructure-containing ligands
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "operator": "in",
+                        "value": list(ligand_pdbid_list),
+                        "attribute": "rcsb_ligand_neighbors.ligand_comp_id"
+                    }
+                },
+                { # Percent identity cutoff
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "operator": "less_or_equal",
+                        "value": 90,
+                        "attribute": "rcsb_cluster_membership.identity"
+                    }
+                },
+                { # No DNA/RNA complexes
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "operator": "equals",
+                        "value": 0,
+                        "attribute": "rcsb_assembly_info.polymer_entity_instance_count_nucleic_acid"
+                    }
+                },
+                { # No hydrid DNA/RNA complexes
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "operator": "equals",
+                        "value": 0,
+                        "attribute": "rcsb_assembly_info.polymer_entity_instance_count_nucleic_acid_hybrid"
+                    }
+                },
+            ]
+            },
+            "request_options": {
+                "return_all_hits": True
+            },
+            "return_type": "entry",
+        }
+
+        response = requests.get("https://search.rcsb.org/rcsbsearch/v1/query", {"json": json.dumps(search_dict)})
+        results = [result["identifier"] for result in response.json()["result_set"]]
+
+        # REPORT
+        print('\nPDB records containing relevant ligands:', results)
+
+        return results
+
+    def search_PDBs_legacy(self, ligand_pdbid_list):
+        """
+        Download all PDBs with the provided fragment-containing ligand
+        Uses depreciated PDB REST API as of Dec. 9, 2020
         :param ligand_pdbid: three character PDBID for the fragment-containing ligand
         :return: 
         """
