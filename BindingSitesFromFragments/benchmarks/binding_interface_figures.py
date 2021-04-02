@@ -526,7 +526,7 @@ def design_metric_histograms(args):
         control_df = complex_df.groupby(['specialrot']).get_group('Control')
         plot_metrics = ['shapecomplementarity', 'holes', 'ligand_sasa', 'incorporated_specialrot']
         for weight, weight_df in complex_df.groupby(['specialrot']):
-            metrics = plot_metrics[:-1] if weight == 0 else plot_metrics
+            metrics = plot_metrics[:-1]
             subplot_dim = len(metrics)
 
             print(metrics, subplot_dim)
@@ -576,12 +576,27 @@ def design_metric_histograms(args):
                 if subplot_dim == 4:
                     axes[subplot_dim - 1, subplot_dim - 1].set_xlabel('incorporated_specialrot')
                 if subplot_dim == 3:
-                    axes[subplot_dim - 1, subplot_dim - 1].set_xlabel('shapecomplementarity')
+                    axes[subplot_dim - 1, subplot_dim - 1].set_xlabel('ligand_sasa')
 
                 handles = [Patch(facecolor=color, edgecolor='k', label=label) for color, label in zip(['#EB093C', '#007CBE'], ['Control', weight])]
-                lgd = fig.legend(handles, ['Control', weight], loc='center right', title='special_rot', ncol=1, bbox_to_anchor=(1.2, 0.5))
+                lgd = fig.legend(handles, ['Control', weight], loc='center right', title='special_rot', ncol=2, bbox_to_anchor=(1.4, 0.5))
 
                 fig.savefig(f'{complex}-{str(abs(weight)).replace(".","")}_Subplots.png', dpi=300, bbox_extra_artist=[lgd], bbox_inches='tight')
+                plt.close()
+
+                # special_rot incorporation
+                fig, axes = plt.subplots(3, 1, figsize=(3, 8), constrained_layout=True, sharex='col', sharey='row', )
+                for index, metric in enumerate(metrics):
+                    sns.violinplot(joint_df['incorporated_specialrot'].astype(int), joint_df[metric], hue=joint_df['specialrot'],
+                                   scale="width", split=True, palette=['#EB093C', '#007CBE'], ax=axes[index])
+                    if axes[index].get_legend():
+                        axes[index].get_legend().remove()
+                    if index < subplot_dim - 1:
+                        axes[index].set_xlabel('')
+
+                handles = [Patch(facecolor=color, edgecolor='k', label=label) for color, label in zip(['#EB093C', '#007CBE'], ['Control', weight])]
+                lgd = fig.legend(handles, ['Control', weight], loc='lower center', title='special_rot', ncol=2, bbox_to_anchor=(1.4, 0.5))
+                fig.savefig(f'{complex}-{str(abs(weight)).replace(".", "")}_specialrot.png', dpi=300, bbox_extra_artist=[lgd], bbox_inches='tight')
                 plt.close()
 
         # Print nice designs
