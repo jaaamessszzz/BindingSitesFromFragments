@@ -226,14 +226,9 @@ class Align_PDB_Factory(object):
                             else:
                                 rejected_dict[current_fragment] = [pdbid]
 
-            # else:
-            #     print('{} has been processed!'.format(pdbid))
-
         # Remember rejected PDBs
         with open(self.rejected_dict_pickle, 'wb') as reject_pickle:
             pickle.dump(rejected_dict, reject_pickle)
-
-    # --- New methods after refactoring clusterfuck --- #
 
     def _init_ligands_to_exclude(self):
         """
@@ -288,11 +283,6 @@ class Align_PDB_Factory(object):
 
             if pdb_path_exists:
                 return True, pdb_path
-
-        # if f'{pdbid}.pdb.gz' in os.listdir(self.pdb_bank_dir):
-        #
-        #     pdb_path = os.path.join(self.pdb_bank_dir, f'{pdbid}.pdb.gz')
-        #     return True, pdb_path
 
         try:
             pdb_path = prody.fetchPDBviaFTP(pdbid)
@@ -392,10 +382,6 @@ class Align_PDB(object):
                 fragment_pdb_atom_name = fragment_pdb_atom.GetMonomerInfo().GetName()
                 self.pdbfrag_refdegree_map[pdb_idx] = ref_ligand_atomname_degree_map[fragment_pdb_atom_name]
 
-                # print(ideal_idx, pdb_idx, fragment_pdb_atom_name, ref_ligand_atomname_degree_map[fragment_pdb_atom_name])
-
-            # pprint(self.pdbfrag_refdegree_map)
-
     def _init_map_fragment_smiles_onto_ideal(self):
         """
         Maps the fragment SMILES string onto the user-defined fragment PDB
@@ -439,81 +425,19 @@ class Align_PDB(object):
             if ligand_pdb_prody is None:
                 continue
 
-            """
-            Still not sure what metrics work the best for all PDBs.
-            
-            I have encountered some structures where atom occupancy is 0 but coordinates are extrapolated from fully 
-            resolved atoms. For now I'm just going to assume these instances are fine...
-            
-            20180114 - I'm starting to think that these metrics aren't necessary... see my group meeting for details. 
-            Actually I'll just copy/paste here after I finish the slide (let's hope I remember...).
-            """
-
             relevant_ligands_prody_dict[(res.resname, ligand_chain, ligand_resnum)] = ligand_pdb_prody
-
-            # Check for multiple/missing occupancies
-            # ligand_pdb_prody_without_hydrogens = ligand_pdb_prody.select('not hydrogen')
-            # full_occupancy = [atom for atom in ligand_pdb_prody_without_hydrogens.getOccupancies() if atom == 1]
-            # missing_occupancy = [atom for atom in ligand_pdb_prody_without_hydrogens.getOccupancies() if atom == 0]
-
-            # fail_conditions_list = [ligand_pdb_prody_without_hydrogens.numCoordsets() > 1,              # Multiple occupancies
-            #                         len(full_occupancy) + len(missing_occupancy) < len(ligand_pdb_prody_without_hydrogens),
-            #                         len(ligand_pdb_prody_without_hydrogens) != len(relevant_ligands[res.resname].ideal_ligand_prody.select('not hydrogen'))  # Missing atoms (compared to ideal structure)
-            #                         ]
-            #
-            # if not any(fail_conditions_list):
-            #     relevant_ligands_prody_dict[(res.resname, ligand_chain, ligand_resnum)] = ligand_pdb_prody
-
-            # DEBUGGING
-            #
-            # else:
-            #     conditions = ['Multiple Occupancies', 'Missing Atoms', 'Missing Atoms']
-            #     pprint(ligand_pdb_prody_without_hydrogens.numCoordsets())
-            #     pprint([(a, b) for a, b in zip(conditions, fail_conditions_list)])
-            #     pprint([len(ligand_pdb_prody_without_hydrogens), len(relevant_ligands[res.resname].ideal_ligand_prody.select('not hydrogen'))])
-            #     pprint([a for a in ligand_pdb_prody_without_hydrogens])
-            #     pprint([a for a in relevant_ligands[res.resname].ideal_ligand_prody.select('not hydrogen')])
-            #
-            #     if ligand_pdb_prody_without_hydrogens.numCoordsets() > 1:
-            #         for coordset in ligand_pdb_prody_without_hydrogens.iterCoordsets():
-            #             print(coordset)
 
         return relevant_ligands_prody_dict
 
     def fragment_target_mapping(self, target_ligand_ideal_smiles, target_ligand_pdb_string):
         """
-        I talked to Chris today and he showed me this chemoinformatics package called RDKit. This may be a much
-        more streamlined method of doing this without needing to resort to subgraphs...
-        > https://sourceforge.net/p/rdkit/mailman/message/34549645/
-
-        I need to pass in...
         * target_ligand_ideal_smiles: SMILES for ligand puled from LigandExpo                   -> self.target_ligand_dict['smiles']
         * target_ligand_pdb_string: Ligand pulled from the current PDB. HYDROGENS REMOVED.      -> self.target_string
 
         self.fragment_smiles_sanitized: Sanitized SMILES string for the user-defined fragment
         self.fragment_string: String representation of user-defined fragment in PDB format
 
-        target_ligand_pdb_string: String representation of the target ligand pulled from current PDB in PDB format. HYDROGENS REMOVED.
-        :param verify_substructure: if true, only use fragment mappings where all atoms in fragment have <= valence when
-        compared to mapped atoms in source reference ligand.
         :return: dict mapping fragment atoms to target atoms
-        """
-
-        """
-        20180516
-        
-        # todo: update fragment_target_mapping to use ideal ligands for mapping
-        
-        I've found that I lose atom valency information when using ligands pulled straight from the target PDBs. For
-        instance, all information about double bonds are lost... obviously this is important information for finding
-        correct substructures. FindMCS has a matchValences option that I want to use, but MolFromPDBBlock does not
-        recover double bonds and hydrogens, leading to incorrect valences despite correct heavy atom connectivity.
-        I should use the ideal ligand PDB from LigandExpo to do the mapping, and then map the correct atoms from the
-        ideal PDB onto the ligand pulled from the target PDB.
-
-        - Ideal ligand from SMILES string
-        - Fragment from SMILES string
-        - PDB ligand from coordinates
         """
 
         # --- Map ideal ligand onto ligand pulled from current PDB --- #
@@ -539,16 +463,12 @@ class Align_PDB(object):
             return False, None
 
         ideal_pdb_mapping = {i_idx: p_idx for i_idx, p_idx in zip(ligand_ideal_match, ligand_pdb_match)}
-
-        # DEBUGGING
-        # pprint(ideal_pdb_mapping)
         
         # --- Map fragment SMILES onto ideal ligand SMILES --- #
 
         # use fragment with hydrogens to map onto ideal ligand with hydrogens
         if self.verify_substructure:
 
-            # print('VERIFYING SUBSTRUCTURE')
             # Hydrogen indicies are appended to current mol so heavy atom numbering is maintained
             ligand_ideal_H = Chem.AddHs(ligand_ideal)
 
@@ -565,12 +485,6 @@ class Align_PDB(object):
                 ligand_substructure_mol_Hs = Chem.MolFromSmarts(fragment_substruct.smartsString)
                 ligand_substructure_mol = Chem.RemoveHs(ligand_substructure_mol_Hs)
 
-                # DEBUGGING
-                # Chem.rdDepictor.Compute2DCoords(ligand_substructure_mol_Hs)
-                # Chem.rdDepictor.Compute2DCoords(ligand_substructure_mol)
-                # Draw.MolToFile(ligand_substructure_mol_Hs, 'fragment_substructure_mol_Hs.png')
-                # Draw.MolToFile(ligand_substructure_mol, 'fragment_substructure_mol.png')
-
                 fragment_pdb_match = self.fragment_pdb_rdkit_mol.GetSubstructMatch(ligand_substructure_mol)
                 ligand_pdb_match = ligand_ideal_H.GetSubstructMatches(ligand_substructure_mol)
 
@@ -578,15 +492,10 @@ class Align_PDB(object):
             fragment_pdb_match_heavyatoms = [atom for atom in fragment_pdb_match if self.fragment_pdb_rdkit_mol.GetAtomWithIdx(atom).GetAtomicNum() != 1]
 
             # Only add mappings to fragment_target_map if all atoms in substructure have <= atom neighbors as fragment in source molecule
-            # print('VERIFYING VALENCES')
             fragment_target_map = list()
 
             for target_match in ligand_pdb_match:
                 include_mapping = True
-
-                # ligand_ideal vs. self.fragment_pdb_rdkit_mol
-                # DEBUGGING
-                # print(target_match, fragment_pdb_match)
 
                 for f_idx, t_idx in zip(fragment_pdb_match, target_match):
                     if f_idx not in fragment_pdb_match_heavyatoms: continue
@@ -595,10 +504,6 @@ class Align_PDB(object):
                     t_atom = ligand_ideal_H.GetAtomWithIdx(t_idx)
                     # NOTE: GetTotalNumHs() doesn't seem to be working correctly...
                     target_neighborcount = len([a.GetSymbol() for a in t_atom.GetNeighbors() if a.GetSymbol() != 'H'])
-
-                    # DEBUGGING
-                    # print('Indicies', f_idx, t_idx)
-                    # print(reference_neighborcount, target_neighborcount)
 
                     # Assert number of atom neighbors for atom <= neighbors for mapped atom in target match
                     if target_neighborcount > reference_neighborcount:
@@ -612,19 +517,6 @@ class Align_PDB(object):
                     fragment_target_map.append([(f_idx, ideal_pdb_mapping[t_idx])
                                                 for f_idx, t_idx in zip(fragment_pdb_match, target_match)
                                                 if f_idx in fragment_pdb_match_heavyatoms])
-
-            # DEBUGGING
-            # Chem.rdDepictor.Compute2DCoords(self.fragment_ideal_rdkit_mol)
-            # Chem.rdDepictor.Compute2DCoords(self.fragment_pdb_rdkit_mol)
-            # Chem.rdDepictor.Compute2DCoords(ligand_ideal_H)
-            # Chem.rdDepictor.Compute2DCoords(ligand_ideal)
-            # Chem.rdDepictor.Compute2DCoords(ligand_pdb)
-            #
-            # Draw.MolToFile(self.fragment_ideal_rdkit_mol, 'fragment_ideal.png')
-            # Draw.MolToFile(self.fragment_pdb_rdkit_mol, 'fragment_pdb.png')
-            # Draw.MolToFile(ligand_ideal_H, 'ligand_ideal_H.png')
-            # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
-            # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
 
         else:
             # Generate a RDKit mol object of the common substructure so that I can map the fragment and target onto it
@@ -651,13 +543,6 @@ class Align_PDB(object):
             # Return atom indicies of substructure matches for fragment and target
             frag_matches = self.fragment_ideal_rdkit_mol.GetSubstructMatch(sub_mol)
             target_matches = ligand_ideal.GetSubstructMatches(sub_mol)
-
-            # DEBUGGING
-            # Draw.MolToFile(self.fragment_ideal_rdkit_mol, 'fragment_ideal.png')
-            # Draw.MolToFile(self.fragment_pdb_rdkit_mol, 'fragment_pdb.png')
-            # Draw.MolToFile(sub_mol, 'fragment_substructure_mol.png')
-            # Draw.MolToFile(ligand_ideal, 'ligand_ideal.png')
-            # Draw.MolToFile(ligand_pdb, 'ligand_pdb.png')
 
             # --- Map fragment pdb atom index to target ligand pdb atom index --- #
 
@@ -707,11 +592,9 @@ class Align_PDB(object):
         if os.path.exists(self.frag_inputs_dir) and self.frag_rigid_pdb_name in os.listdir(self.frag_inputs_dir):
             print('* Using defined rigid atoms for alignment *')
             frag_atom_rigid, trgt_atom_rigid = self.return_rigid_atoms(frag_atom_coords, trgt_atom_coords)
-            # return (trgt_atom_rigid, target_fragment_atom_serials), frag_atom_rigid, prody.calcTransformation(trgt_atom_rigid, frag_atom_rigid)
             return (trgt_atom_rigid, target_fragment_atom_serials), frag_atom_rigid, Generate_Constraints.calculate_transformation_matrix(trgt_atom_rigid, frag_atom_rigid)
 
         else:
-            # return (trgt_atom_coords, target_fragment_atom_serials), frag_atom_coords, prody.calcTransformation(trgt_atom_coords, frag_atom_coords)
             return (trgt_atom_coords, target_fragment_atom_serials), frag_atom_coords, Generate_Constraints.calculate_transformation_matrix(trgt_atom_coords, frag_atom_coords)
 
     def return_rigid_atoms(self, frag_atom_coords, trgt_atom_coords):
