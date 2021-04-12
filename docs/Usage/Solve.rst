@@ -4,11 +4,17 @@ Solve for Composite Binding Sites
 
 From the ``Compounds/`` directory, enter: ::
 
-    bsff mcsolve <Compound_ID> <current_iteration_fuzzball_dir> <motif_size>
+    bsff mcsolve sge <Compound_ID> <current_iteration_fuzzball_dir> <motif_size> [options]
 
 Where <Compound_ID> is the name of the project directory for your target molecule, <current_iteration_fuzzball_dir> is
 the directory containing the contact pool created by the `bsff assemble` command, and <motif_size> is the number of
 residues that should compose the composite binding site (this include the ligand!).
+
+Alternatively, use the command: ::
+
+    bsff mcsolve local <user_defined_dir> <fuzzball_pdb_path> <motif_size> [options]
+
+To solve for composite binding sites for a given fuzzball specified by <fuzzball_pdb_path>.
 
 .. autofunction:: BindingSitesFromFragments.commands.bsff_gurobi.mc_solve
 
