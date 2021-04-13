@@ -38,7 +38,7 @@ def mc_solve(args):
       <motif_size>                              Target binding motif size
 
     Options:
-      --block=<block_size>, -b <block_size>     If running on the cluster, number of trajectories per fuzzball (default: 1)
+      --block=<block_size>, -b <block_size>     If running on the cluster, number of trajectories per fuzzball [default: 1]
       --include_defined, -i                     Included defined residues
     """
     from ..solve import montecarlo_motif
