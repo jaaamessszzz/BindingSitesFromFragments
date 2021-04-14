@@ -169,6 +169,9 @@ def generate_fuzzball_contact_rotamersets(ligand_conformer_path, match_path, mat
 
             minimize_motif = rosetta.protocols.minimization_packing.MinMover()
             minimize_motif.movemap(motif_movemap)
+            minimize_motif.score_function(sfxn)
+            minimize_motif.min_type('lbfgs_armijo')
+            minimize_motif.tolerance(1e-6)
 
         # Prepare infrastructure
         rotamer_stats[position] = dict()
